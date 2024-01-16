@@ -2,16 +2,18 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from EncoderComponents.PositionalEmbedding import PositionalEmbedding
-from EncoderComponents.EncoderBlock import EncoderBlock
+from transformer_blocks import PositionalEmbedding, EncoderBlock
+
 
 class VoicetronParameters:
     sample_rate: int
+
     randomask_p_min: float
     randomask_p_max: float
+
     target_sample_len: int
-    source_history_len: int
-    source_fragment_len: int
+    history_tlen: int
+    fragment_tlen: int
     batch_size: int
 
 
@@ -45,12 +47,13 @@ class AudioEncoder(nn.Module):
         super().__init__()
 
 
-class RandoMask:
+class RandoMask(nn.Module):
     """
     Masks some portion of the input.
     Allows us to use different settings for the quality/similarity tradeoff.
     """
     def __init__(self, p_min, p_max):
+        super().__init__()
         eps = 0.0001
         assert p_min < p_max + eps / 2
         assert 0 <= p_min <= 1  # "p" for "portion"
@@ -77,7 +80,7 @@ class RandoMask:
 
 
 class AudioDecoder(nn.Module):
-    def __init__(self, dims: VoicetronParameters):
+    def __init__(self, pars: VoicetronParameters):
         super().__init__()
 
 
@@ -89,9 +92,11 @@ class Voicetron(nn.Module):
         self.rando_mask = RandoMask(pars.randomask_p_min, pars.randomask_p_max)
         self.audio_decoder = AudioDecoder(pars)
 
-    def forward(self, target_sample, source_history, source_fragment):
+    def forward(self, target_sample, source_history, source_fragment, target_history=None):
+        if target_history is None:
+            target_history = source_history
+
         embedding = self.speaker_encoder(target_sample)
-        intermediate = self.audio_encoder(source_fragment)
-        intermediate = self.rando_mask(intermediate)
+        intermediate = self.rando_mask(self.audio_encoder(source_fragment, target_history))
         output = self.audio_decoder(embedding, source_history, intermediate)
         return output
