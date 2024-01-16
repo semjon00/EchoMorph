@@ -33,7 +33,7 @@ class SpeakerEncoder(nn.Module):
         # TODO create a sensible _encoding_ for these values
         self.pos_embed = PositionalEmbedding(pars.target_sample_len, pars.target_sample_len)
         self.blocks = nn.ModuleList([
-            EncoderBlock(embed_dim, num_heads, hidden_dim, pars.target_sample_len, attn_drop=pars.drop, drop=pars.drop)
+            EncoderBlock(hidden_dim, num_heads, hidden_dim, pars.target_sample_len, attn_drop=pars.drop, drop=pars.drop)
             for _ in range(num_blocks)
         ])
         self.dropout = nn.Dropout(pars.drop)
@@ -99,6 +99,7 @@ class Voicetron(nn.Module):
         self.audio_decoder = AudioDecoder(pars)
 
     def forward(self, target_sample, source_history, source_fragment, target_history=None):
+        """Used for training, use inference.py for usage"""
         if target_history is None:
             target_history = source_history
 

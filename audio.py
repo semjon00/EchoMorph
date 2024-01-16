@@ -19,12 +19,12 @@ class AudioConventer:
         return r(wv)
 
     def convert_from_wave(self, wv):
-        sg = self.transform_to(wv)
-        return torch.cat([sg.real, sg.imag], dim=0).to(self.device, self.dtype)
+        sg = self.transform_to(wv).T
+        return torch.cat([sg.real, sg.imag], dim=1).to(self.device, self.dtype)
 
     def convert_to_wave(self, x):
-        split_size = x.size(0) // 2
-        sg = torch.complex(x[:split_size, ...], x[split_size:, ...])
+        split_size = x.size(1) // 2
+        sg = torch.complex(x[..., :split_size], x[..., split_size:]).T
         wv = self.transform_from(sg)
         return wv
 

@@ -85,4 +85,5 @@ class EncoderBlock(nn.Module):
 
         return out
 
-# TODO: Decoder block, with TWO cross attention modules
+# TODO: Allow cross-attention in encoder/decoder blocks.
+# TODO: Encoder needs to cross-attend to source history, decoder to target history and speech embedding
