@@ -25,15 +25,21 @@ class SpeakerEncoder(nn.Module):
 
         num_blocks = 6
         num_heads = 8
-        hidden_dim = pars.target_sample_len
 
         # TODO: should cross-attend source_history
 
-        # TODO we have self.spect_width * self.spect_width values in total - 1028000 for current parameters.
-        # TODO create a sensible _encoding_ for these values
-        self.pos_embed = PositionalEmbedding(pars.target_sample_len, pars.target_sample_len)
+        self.pos_embed = PositionalEmbedding(
+            seq_len=pars.target_sample_len, 
+            embed_dim=pars.target_sample_len
+        )
         self.blocks = nn.ModuleList([
-            TransformerBlock(hidden_dim, num_heads, hidden_dim, pars.target_sample_len, attn_drop=pars.drop, drop=pars.drop)
+            TransformerBlock(
+                embed_dim=pars.spect_width, 
+                num_heads=num_heads, 
+                hidden_dim=pars.spect_width,
+                attn_drop=pars.drop, 
+                drop=pars.drop
+            )
             for _ in range(num_blocks)
         ])
         self.dropout = nn.Dropout(pars.drop)
@@ -45,7 +51,7 @@ class SpeakerEncoder(nn.Module):
         out = self.dropout(out)
         for block in self.blocks:
             out = block(out)
-        return out
+        return torch.mean(out, dim=-1)
 
 class AudioEncoder(nn.Module):
     def __init__(self, dims: VoicetronParameters):

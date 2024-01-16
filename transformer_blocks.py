@@ -4,9 +4,9 @@ from torch import Tensor as T
 import einops
 
 class PositionalEmbedding(nn.Module):
-    def __init__(self, max_len: int, embed_dim: int):
+    def __init__(self, seq_len: int, embed_dim: int):
         super().__init__()
-        self.pos_embed = nn.Parameter(torch.zeros(max_len, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(seq_len, embed_dim))
 
     def forward(self, x: T) -> T:
         return x + self.pos_embed[:x.shape[1]]
@@ -32,7 +32,8 @@ class AttentionBlock(nn.Module):
     def head_merging(self, x: T) -> T:
         return einops.rearrange(x, '... h s d -> ... s (h d)')
 
-    def forward(self, q, k, v: T) -> T:
+    def forward(self, x: T) -> T:
+        q, k, v = self.qkv_partition(x)
         q, k, v = map(self.head_partition, (q, k, v))
 
         attn_scores = torch.einsum('...qc,...kc->...qk', q, k) * self.scale
@@ -59,7 +60,6 @@ class TransformerBlock(nn.Module):
         embed_dim: int,
         num_heads: int,
         hidden_dim: int,
-        max_len: int,
         attn_drop: float,
         drop: float,
     ):
@@ -78,7 +78,7 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x: T) -> T:
         res = x
-        out = self.self_attn(self.self_attn.qkv_partition(x))
+        out = self.self_attn(x)
         out = self.self_attn_dropout(out)
         out = self.self_attn_norm(out + res)
 
