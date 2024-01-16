@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from transformer_blocks import PositionalEmbedding, EncoderBlock
+from transformer_blocks import PositionalEmbedding, TransformerBlock
 
 
 class VoicetronParameters:
@@ -33,7 +33,7 @@ class SpeakerEncoder(nn.Module):
         # TODO create a sensible _encoding_ for these values
         self.pos_embed = PositionalEmbedding(pars.target_sample_len, pars.target_sample_len)
         self.blocks = nn.ModuleList([
-            EncoderBlock(hidden_dim, num_heads, hidden_dim, pars.target_sample_len, attn_drop=pars.drop, drop=pars.drop)
+            TransformerBlock(hidden_dim, num_heads, hidden_dim, pars.target_sample_len, attn_drop=pars.drop, drop=pars.drop)
             for _ in range(num_blocks)
         ])
         self.dropout = nn.Dropout(pars.drop)

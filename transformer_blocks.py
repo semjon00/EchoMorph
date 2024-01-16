@@ -53,7 +53,7 @@ class FeedForward(nn.Sequential):
             nn.Linear(hidden_dim, embed_dim)
         )
 
-class EncoderBlock(nn.Module):
+class TransformerBlock(nn.Module):
     def __init__(
         self,
         embed_dim: int,
@@ -67,6 +67,10 @@ class EncoderBlock(nn.Module):
         self.self_attn = AttentionBlock(embed_dim, num_heads, attn_drop)
         self.self_attn_dropout = nn.Dropout(p=drop)
         self.self_attn_norm = nn.LayerNorm(embed_dim)
+
+        # TODO: optional cross-attention should go here I think?
+        # TODO: Encoder needs to cross-attend to source history, decoder to target history and speech embedding
+        # TODO: So it is optional, and should support any number of stuff to cross-attend
 
         self.ffn = FeedForward(embed_dim, hidden_dim)
         self.ffn_dropout = nn.Dropout(p=drop)
@@ -84,6 +88,3 @@ class EncoderBlock(nn.Module):
         out = self.ffn_norm(out + res)
 
         return out
-
-# TODO: Allow cross-attention in encoder/decoder blocks.
-# TODO: Encoder needs to cross-attend to source history, decoder to target history and speech embedding
