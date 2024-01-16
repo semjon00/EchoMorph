@@ -6,36 +6,39 @@ from transformer_blocks import PositionalEmbedding, EncoderBlock
 
 
 class VoicetronParameters:
-    sample_rate: int
+    def __init__(self):
+        self.target_sample_len = (32000 // 128) * 8 // 1  # 8sec * sample_rate / hop_length
+        self.history_len = (32000 // 128)  # 1 sec
+        self.fragment_len = (32000 // 128) // 4  # 0.25sec
+        self.spect_width = 514  # x_width
 
-    randomask_p_min: float
-    randomask_p_max: float
+        self.batch_size = 256
+        self.drop = 0.1
 
-    target_sample_len: int
-    history_tlen: int
-    fragment_tlen: int
-    batch_size: int
+        self.randomask_p_min = 1 / 8
+        self.randomask_p_max = 1
 
 
 class SpeakerEncoder(nn.Module):
-    def __init__(self, dims: VoicetronParameters):
+    def __init__(self, pars: VoicetronParameters):
         super().__init__()
 
         num_blocks = 6
-        max_len = dims.target_sample_len
-        embed_dim = max_len
         num_heads = 8
-        hidden_dim = max_len
-        drop = 0.1
-        
-        self.pos_embed = PositionalEmbedding(max_len, embed_dim)
+        hidden_dim = pars.target_sample_len
+
+        # TODO we have self.spect_width * self.spect_width values in total - 1028000 for current parameters.
+        # TODO create a sensible _encoding_ for these values
+        self.pos_embed = PositionalEmbedding(pars.target_sample_len, pars.target_sample_len)
         self.blocks = nn.ModuleList([
-            EncoderBlock(embed_dim, num_heads, hidden_dim, max_len, attn_drop=drop, drop=drop)
+            EncoderBlock(embed_dim, num_heads, hidden_dim, pars.target_sample_len, attn_drop=pars.drop, drop=pars.drop)
             for _ in range(num_blocks)
         ])
-        self.dropout = nn.Dropout(drop)
+        self.dropout = nn.Dropout(pars.drop)
 
     def forward(self, x: Tensor) -> Tensor:
+        # TODO: Maybe just take it and split to chunks of necessary lenght, then take the mean?
+
         out = self.pos_embed(x)
         out = self.dropout(out)
         for block in self.blocks:
@@ -87,6 +90,7 @@ class AudioDecoder(nn.Module):
 class Voicetron(nn.Module):
     def __init__(self, pars: VoicetronParameters):
         super().__init__()
+        self.pars = pars
         self.speaker_encoder = SpeakerEncoder(pars)
         self.audio_encoder = AudioEncoder(pars)
         self.rando_mask = RandoMask(pars.randomask_p_min, pars.randomask_p_max)

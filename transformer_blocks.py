@@ -64,7 +64,7 @@ class EncoderBlock(nn.Module):
         drop: float,
     ):
         super().__init__()
-        self.self_attn = AttentionBlock(embed_dim, num_heads, max_len, attn_drop)
+        self.self_attn = AttentionBlock(embed_dim, num_heads, attn_drop)
         self.self_attn_dropout = nn.Dropout(p=drop)
         self.self_attn_norm = nn.LayerNorm(embed_dim)
 
@@ -84,3 +84,5 @@ class EncoderBlock(nn.Module):
         out = self.ffn_norm(out + res)
 
         return out
+
+# TODO: Decoder block, with TWO cross attention modules

@@ -33,12 +33,3 @@ class AudioConventer:
 
     def x_width(self):
         return (self.n_fft // 2 + 1) * 2
-
-
-if __name__ == '__main__':
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    ac = AudioConventer(device)
-    audio = ac.load_audio('./dataset/example.aac')
-    x = ac.convert_from_wave(audio)
-    audio = ac.convert_to_wave(x)
-    ac.save_audio(audio, './dataset/temp2.wav')
