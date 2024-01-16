@@ -5,8 +5,8 @@ import torchaudio.transforms as transforms
 class AudioConventer:
     def __init__(self, x_device):
         self.sample_rate = 32000
-        self.n_fft = 512
-        self.hop_length = self.n_fft // 4
+        self.n_fft = 510
+        self.hop_length = self.n_fft // 5
         self.device = x_device
         self.dtype = torch.float32
         self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None)

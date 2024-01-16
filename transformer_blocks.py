@@ -9,7 +9,7 @@ class PositionalEmbedding(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(seq_len, embed_dim))
 
     def forward(self, x: T) -> T:
-        return x + self.pos_embed[:x.shape[1]]
+        return x + self.pos_embed  # seq_len is *always* constant in our case
 
 
 class SelfAttention(nn.Module):
@@ -95,7 +95,7 @@ class CrossAttention(nn.Module):
         out = self.head_merging(out)
         out = self.proj_out(out)
         out = self.drop(out)
-        out = self.norm(out + res)
+        out = self.norm(out + res)  # TODO: Why is this norm layer here, but not in the self-attention?
 
         return out
 
@@ -109,6 +109,8 @@ class TransformerBlock(nn.Module):
         attn_drop: float,
         drop: float,
         n_cross_attn_blocks: int = 0
+        # TODO: This (probably) does not work for our case!
+        # TODO: The dimensions of what we attend are not the same!
     ):
         super().__init__()
         self.self_attn = SelfAttention(embed_dim, num_heads, attn_drop)
