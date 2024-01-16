@@ -2,17 +2,43 @@ import torch
 import torchaudio
 import torchaudio.transforms as transforms
 
-sample_rate = 32000
+class AudioConventer:
+    def __init__(self, x_device):
+        self.sample_rate = 32000
+        self.n_fft = 512
+        self.hop_length = self.n_fft // 4
+        self.device = x_device
+        self.dtype = torch.float32
+        self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None)
+        self.transform_from = transforms.InverseSpectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
+
+    def load_audio(self, path):
+        wv, sr = torchaudio.load(path)
+        wv = wv.to(self.device, self.dtype).mean(dim=0)  # To correct device, type, and to mono
+        r = transforms.Resample(sr, self.sample_rate, dtype=self.dtype)
+        return r(wv)
+
+    def convert_from_wave(self, wv):
+        sg = self.transform_to(wv)
+        return torch.cat([sg.real, sg.imag], dim=0).to(self.device, self.dtype)
+
+    def convert_to_wave(self, x):
+        split_size = x.size(0) // 2
+        sg = torch.complex(x[:split_size, ...], x[split_size:, ...])
+        wv = self.transform_from(sg)
+        return wv
+
+    def save_audio(self, wv, path):
+        torchaudio.save(path, wv.unsqueeze(0), self.sample_rate)
+
+    def x_width(self):
+        return (self.n_fft // 2 + 1) * 2
+
 
 if __name__ == '__main__':
-    wv, sr = torchaudio.load('./dataset/example.aac')
-
-    resampler = transforms.Resample(sr, sample_rate, dtype=torch.float32)
-    transform_to = transforms.Spectrogram(n_fft=512, power=None)
-    transform_from = transforms.InverseSpectrogram(n_fft=512)
-
-    wv = resampler(wv)
-    sg = transform_to(wv)
-    wv_back = transform_from(sg)
-
-    torchaudio.save('./dataset/temp2.wav', wv_back, sample_rate)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    ac = AudioConventer(device)
+    audio = ac.load_audio('./dataset/example.aac')
+    x = ac.convert_from_wave(audio)
+    audio = ac.convert_to_wave(x)
+    ac.save_audio(audio, './dataset/temp2.wav')
