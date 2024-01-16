@@ -45,8 +45,6 @@ class SpeakerEncoder(nn.Module):
         self.dropout = nn.Dropout(pars.drop)
 
     def forward(self, x: Tensor) -> Tensor:
-        # TODO: Maybe just take it and split to chunks of necessary lenght, then take the mean?
-
         out = self.pos_embed(x)
         out = self.dropout(out)
         for block in self.blocks:
