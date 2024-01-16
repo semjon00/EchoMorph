@@ -27,6 +27,8 @@ class SpeakerEncoder(nn.Module):
         num_heads = 8
         hidden_dim = pars.target_sample_len
 
+        # TODO: should cross-attend source_history
+
         # TODO we have self.spect_width * self.spect_width values in total - 1028000 for current parameters.
         # TODO create a sensible _encoding_ for these values
         self.pos_embed = PositionalEmbedding(pars.target_sample_len, pars.target_sample_len)
@@ -101,6 +103,6 @@ class Voicetron(nn.Module):
             target_history = source_history
 
         embedding = self.speaker_encoder(target_sample)
-        intermediate = self.rando_mask(self.audio_encoder(source_fragment, target_history))
-        output = self.audio_decoder(embedding, source_history, intermediate)
+        intermediate = self.rando_mask(self.audio_encoder(source_fragment, source_history))
+        output = self.audio_decoder(embedding, target_history, intermediate)
         return output
