@@ -24,7 +24,7 @@ def standard_inference(model: Voicetron, target_sample, source):
         intermediate = model.rando_mask(model.audio_encoder(source[cur:cur+fl, :], source[cur-hl:cur, :]))
         target[cur:cur+fl, :] = model.audio_decoder(speaker_characteristic, target[cur-hl:cur, :], intermediate)
 
-    return target
+    return target[hl:, ...]
 
 # TODO: allow replacing the target_sample with some nonsense:
 #        - Mix two (or more) speaker representations
