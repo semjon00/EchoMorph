@@ -1,15 +1,18 @@
 import numpy as np
 import torch
 from torch import Tensor, nn
+import einops
 
 from transformer_blocks import PositionalEmbedding, TransformerBlock
 
 
 class VoicetronParameters:
     def __init__(self):
-        self.target_sample_len = (32000 // 105) * 8 // 1  # 8sec * sample_rate / hop_length
-        self.history_len = (32000 // 105)  # 1 sec
-        self.fragment_len = (32000 // 105) // 4  # 0.25sec
+        one_sec_len = (32000 // 105) // 8 * 8  # sample_rate / hop_length
+
+        self.target_sample_len = 8 * one_sec_len
+        self.history_len = one_sec_len
+        self.fragment_len = one_sec_len // 4
         self.spect_width = 512  # x_width
 
         self.batch_size = 256
@@ -18,6 +21,7 @@ class VoicetronParameters:
         self.se_blocks = 6
         self.se_heads = 8
         self.se_hidden_dim_m = 2
+        self.se_squeeze_k = 4
 
         self.rm_k_min = 1 / 8
         self.rm_k_max = 1
@@ -25,7 +29,6 @@ class VoicetronParameters:
 
 
 class SpeakerEncoder(nn.Module):
-    # TODO: implement criss cross in the morning
     def __init__(self, pars: VoicetronParameters):
         super().__init__()
 
@@ -33,26 +36,27 @@ class SpeakerEncoder(nn.Module):
             seq_len=pars.target_sample_len, 
             embed_dim=pars.spect_width
         )
-        self.blocks = nn.ModuleList([
-            TransformerBlock(
-                embed_dim=pars.spect_width, 
+        blocks = []
+        assert pars.se_blocks % 2 == 0, "Criss-crossing won't work"
+        for i in range(pars.se_blocks):
+            ed = pars.spect_width if i % 2 == 0 else pars.target_sample_len
+            blocks += [TransformerBlock(
+                embed_dim=ed,
                 num_heads=pars.se_heads,
-                hidden_dim=pars.spect_width * pars.se_hidden_dim_m,
-                attn_drop=pars.drop, 
+                hidden_dim=ed * pars.se_hidden_dim_m,
+                attn_drop=pars.drop,
                 drop=pars.drop
-            )
-            for _ in range(pars.se_blocks)
-        ])
+            )]
+        self.blocks = nn.ModuleList(blocks)
         self.dropout = nn.Dropout(pars.drop)
+        self.squeeze_k = pars.se_squeeze_k
 
     def forward(self, x: Tensor) -> Tensor:
         out = self.pos_embed(x)
         out = self.dropout(out)
         for block in self.blocks:
-            out = block(out)
-        return torch.mean(out, dim=-1)
-        # TODO: this is wrong. ~2000 values is are not enough to represent a speaker, since the bottleneck will pass a comparable
-        # TODO: number of parameters, whereas the speaker-encoder output should be much-much bigger.
+            out = block(out).T
+        return einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
 
 class AudioEncoder(nn.Module):
     def __init__(self, dims: VoicetronParameters):
