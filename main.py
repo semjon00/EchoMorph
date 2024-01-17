@@ -1,7 +1,7 @@
 import torch
 
 from audio import AudioConventer
-from model import Voicetron, VoicetronParameters
+from model import EchoMorph, EchoMorphParameters
 from inference import standard_inference
 
 if __name__ == '__main__':
@@ -13,8 +13,8 @@ if __name__ == '__main__':
     ts_x = ac.convert_from_wave(target_sample)
     src_x = ac.convert_from_wave(source)
 
-    pars = VoicetronParameters()
-    model = Voicetron(pars)
+    pars = EchoMorphParameters()
+    model = EchoMorph(pars)
 
     output = standard_inference(model, ts_x, src_x)
     #output = ts_x

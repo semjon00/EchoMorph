@@ -14,7 +14,7 @@ from transformer_blocks import PositionalEmbedding, TransformerBlock
 
 # TODO: Maybe use intermediate representation for autoregressive feeding of history?
 
-class VoicetronParameters:
+class EchoMorphParameters:
     def __init__(self):
         one_sec_len = (32000 // 105) // 32 * 32  # sample_rate / hop_length; approximately
 
@@ -48,7 +48,7 @@ class VoicetronParameters:
 
 
 class SpeakerEncoder(nn.Module):
-    def __init__(self, pars: VoicetronParameters):
+    def __init__(self, pars: EchoMorphParameters):
         super().__init__()
 
         self.pos_embed = PositionalEmbedding(
@@ -116,7 +116,7 @@ class AudioCoder(nn.Module):
 
 
 class AudioEncoder(AudioCoder):
-    def __init__(self, pars: VoicetronParameters):
+    def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.ae_hidden_dim_m, pars.ae_heads, pars.fragment_len,
                          pars.drop, pars.ae_blocks, 1, pars.mid_repeat_interval)
 
@@ -133,7 +133,7 @@ class AudioEncoder(AudioCoder):
 
 
 class AudioDecoder(AudioCoder):
-    def __init__(self, pars: VoicetronParameters):
+    def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.ad_hidden_dim_m, pars.ad_heads, pars.fragment_len,
                          pars.drop, pars.ad_blocks, 2, pars.mid_repeat_interval)
 
@@ -180,8 +180,8 @@ class RandoMask(nn.Module):
         return x
 
 
-class Voicetron(nn.Module):
-    def __init__(self, pars: VoicetronParameters):
+class EchoMorph(nn.Module):
+    def __init__(self, pars: EchoMorphParameters):
         super().__init__()
         self.pars = pars
         self.speaker_encoder = SpeakerEncoder(pars)

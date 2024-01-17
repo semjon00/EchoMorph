@@ -1,6 +1,6 @@
 import torch
 
-from model import Voicetron
+from model import EchoMorph
 
 # TODO: training might need stuff like this, maybe extract to a separate file
 def crop_from_middle(x, length):
@@ -11,7 +11,7 @@ def crop_from_middle(x, length):
     x = x[start:start + length, ...]
     return x
 
-def standard_inference(model: Voicetron, target_sample, source):
+def standard_inference(model: EchoMorph, target_sample, source):
     """Trivial inference procedure. No interpolating or using the entire target sample"""
     speaker_characteristic = model.speaker_encoder(crop_from_middle(target_sample, model.pars.target_sample_len))
 
