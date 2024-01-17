@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 import einops
+import random
 
 from transformer_blocks import PositionalEmbedding, TransformerBlock
 
@@ -15,7 +16,7 @@ from transformer_blocks import PositionalEmbedding, TransformerBlock
 
 class VoicetronParameters:
     def __init__(self):
-        one_sec_len = (32000 // 105) // 16 * 16  # sample_rate / hop_length; approximately
+        one_sec_len = (32000 // 105) // 32 * 32  # sample_rate / hop_length; approximately
 
         self.target_sample_len = 8 * one_sec_len
         self.history_len = one_sec_len
@@ -34,14 +35,14 @@ class VoicetronParameters:
         self.mid_repeat_interval = (2, 6)  # (inclusive, exclusive)
 
         self.ae_blocks = (6, 4, 4)
-        self.ae_heads = 12
+        self.ae_heads = 8
         self.ae_hidden_dim_m = 3
 
-        self.ad_blocks = (4, 4, 6)
-        self.ad_heads = 12
+        self.ad_blocks = (4, 6, 8)
+        self.ad_heads = 8
         self.ad_hidden_dim_m = 3
 
-        self.rm_k_min = 1 / 64
+        self.rm_k_min = 0
         self.rm_k_max = 1 / 2
         self.rm_fun = 'exp'
 
@@ -70,11 +71,12 @@ class SpeakerEncoder(nn.Module):
         self.squeeze_k = pars.target_sample_len // pars.sc_len
 
     def forward(self, x: Tensor) -> Tensor:
-        out = self.pos_embed(x)
-        out = self.dropout(out)
+        x = self.pos_embed(x)
+        x = self.dropout(x)
         for block in self.blocks:
-            out = block(out).T
-        return einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
+            x = block(x).T
+        x = einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
+        return x
 
 
 class AudioCoder(nn.Module):
@@ -104,7 +106,8 @@ class AudioCoder(nn.Module):
     def forward(self, x: Tensor, cross: list[Tensor]):
         for i, block in enumerate(self.blocks_pre):
             x = block(x, cross if i % 2 == 0 else []).T
-        for rep in range(self.mid_repeat_interval):
+        mid_times = random.randint(*self.mid_repeat_interval)
+        for rep in range(mid_times):
             for i, block in enumerate(self.blocks_pre):
                 x = block(x, cross if i % 2 == 0 else []).T
         for i, block in enumerate(self.blocks_pre):
@@ -165,7 +168,7 @@ class RandoMask(nn.Module):
         self.k_min = self.k_max = new_p
 
     def forward(self, x: Tensor):
-        els = x.shape[1]
+        els = x.shape[-2]
         pp = self.rng.random() if self.mode == 'r' else self.k_min
         if self.fun == 'lin':
             pels = els * (pp * (self.k_max - self.k_min) + self.k_min)
@@ -173,7 +176,7 @@ class RandoMask(nn.Module):
             pels = els ** (pp * (self.k_max - self.k_min) + self.k_min)
         else:
             raise "Wrong randomask fun"
-        x[..., round(pels):] = 0
+        x[..., round(pels):, :] = 0
         return x
 
 

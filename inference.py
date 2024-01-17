@@ -22,7 +22,7 @@ def standard_inference(model: Voicetron, target_sample, source):
 
     for cur in range(hl, target.size(0), fl):
         intermediate = model.rando_mask(model.audio_encoder(source[cur:cur+fl, :], source[cur-hl:cur, :]))
-        target[cur:cur+fl, :] = model.audio_decoder(speaker_characteristic, target[cur-hl:cur, :], intermediate)
+        target[cur:cur+fl, :] = model.audio_decoder(intermediate, speaker_characteristic, target[cur-hl:cur, :])
 
     return target[hl:, ...]
 
