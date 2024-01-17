@@ -19,8 +19,9 @@ class VoicetronParameters:
         self.se_heads = 8
         self.se_hidden_dim_m = 2
 
-        self.rm_p_min = 1 / 8
-        self.rm_p_max = 1
+        self.rm_k_min = 1 / 8
+        self.rm_k_max = 1
+        self.rm_fun = 'exp'
 
 
 class SpeakerEncoder(nn.Module):
@@ -63,30 +64,36 @@ class RandoMask(nn.Module):
     Masks some portion of the input.
     Allows us to use different settings for the quality/similarity tradeoff.
     """
-    def __init__(self, p_min, p_max):
+    def __init__(self, k_min, k_max, fun):
         super().__init__()
         eps = 0.0001
-        assert p_min < p_max + eps / 2
-        assert 0 <= p_min <= 1  # "p" for "portion"
-        assert 0 <= p_max <= 1
-        self.mode = 'c' if abs(p_max - p_min) < eps else 'r'
+        assert k_min < k_max + eps / 2
+        assert 0 <= k_min <= 1  # "p" for "portion"
+        assert 0 <= k_max <= 1
+        self.mode = 'c' if abs(k_max - k_min) < eps else 'r'
         if self.mode == 'r':
             self.rng = np.random.default_rng(12345)
         else:
             self.rng = None
-        self.p_min = p_min
-        self.p_max = p_max
+        self.k_min = k_min
+        self.k_max = k_max
+        self.fun = fun
 
     def set_p(self, new_p):
         assert 0 <= new_p <= 1
         self.mode = 'c'
-        self.p_min = self.p_max = new_p
+        self.k_min = self.k_max = new_p
 
     def forward(self, x: Tensor):
         els = x.shape[1]
-        p = self.rng.random() * (self.p_max - self.p_min) + self.p_min
-        els_passthrough = round(els * p)
-        x[:, els_passthrough:] = 0
+        pp = self.rng.random() if self.mode == 'r' else self.k_min
+        if self.fun == 'lin':
+            pels = els * (pp * (self.k_max - self.k_min) + self.k_min)
+        elif self.fun == 'exp':
+            pels = els ** (pp * (self.k_max - self.k_min) + self.k_min)
+        else:
+            raise "Wrong randomask fun"
+        x[..., round(pels):] = 0
         return x
 
 
@@ -101,7 +108,7 @@ class Voicetron(nn.Module):
         self.pars = pars
         self.speaker_encoder = SpeakerEncoder(pars)
         self.audio_encoder = AudioEncoder(pars)
-        self.rando_mask = RandoMask(pars.rm_p_min, pars.rm_p_max)
+        self.rando_mask = RandoMask(pars.rm_k_min, pars.rm_k_max, pars.rm_fun)
         self.audio_decoder = AudioDecoder(pars)
 
     def forward(self, target_sample, source_history, source_fragment, target_history=None):
