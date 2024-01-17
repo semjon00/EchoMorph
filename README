@@ -7,6 +7,7 @@ Features:
 * Randomask: allows to not train 8 different models with different sizes of bottleneck, but use the same model with
            configurable bottleneck size.
 * Cris-cross: Propagates attention in different ways so signal can be propagated in different ways.
+* Repeating blocks: Allows modifying quality
 
 Dataset (obtained is a way that is absolutely not legally questionable, trust me bro guarantee):
 * Talks in 200 languages, males

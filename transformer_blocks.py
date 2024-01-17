@@ -109,8 +109,6 @@ class TransformerBlock(nn.Module):
         attn_drop: float,
         drop: float,
         n_cross_attn_blocks: int = 0
-        # TODO: This (probably) does not work for our case!
-        # TODO: The dimensions of what we attend are not the same!
     ):
         super().__init__()
         self.self_attn = SelfAttention(embed_dim, num_heads, attn_drop)
