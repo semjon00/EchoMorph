@@ -12,8 +12,12 @@ class AudioConventer:
         self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None)
         self.transform_from = transforms.InverseSpectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
 
-    def load_audio(self, path):
-        wv, sr = torchaudio.load(path)
+    def total_frames(self, path):
+        # Total frames number is the same for stereo and corresponding mono
+        return torchaudio.info(path).num_frames
+
+    def load_audio(self, *args, **kwargs):
+        wv, sr = torchaudio.load(*args, **kwargs)
         wv = wv.to(self.device, self.dtype).mean(dim=0)  # To correct device, type, and to mono
         r = transforms.Resample(sr, self.sample_rate, dtype=self.dtype)
         return r(wv)

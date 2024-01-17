@@ -15,6 +15,7 @@ if __name__ == '__main__':
 
     pars = EchoMorphParameters()
     model = EchoMorph(pars)
+    model.eval()
 
     output = standard_inference(model, ts_x, src_x)
     #output = ts_x

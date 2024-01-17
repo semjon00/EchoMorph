@@ -25,7 +25,6 @@ class EchoMorphParameters:
 
         self.sc_len = self.target_sample_len // 4  # Speaker characteristic
 
-        self.batch_size = 256
         self.drop = 0.1
 
         self.se_blocks = 8
