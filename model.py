@@ -50,6 +50,8 @@ class SpeakerEncoder(nn.Module):
         for block in self.blocks:
             out = block(out)
         return torch.mean(out, dim=-1)
+        # TODO: this is wrong. ~2000 values is are not enough to represent a speaker, since the bottleneck will pass a comparable
+        # TODO: number of parameters, whereas the speaker-encoder output should be much-much bigger.
 
 class AudioEncoder(nn.Module):
     def __init__(self, dims: VoicetronParameters):
