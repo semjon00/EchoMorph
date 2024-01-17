@@ -31,8 +31,7 @@ class VoicetronParameters:
         self.se_heads = 8
         self.se_hidden_dim_m = 3
 
-        self.mid_repeat_min = 2
-        self.mid_repeat_max = 5
+        self.mid_repeat_interval = (2, 6)  # (inclusive, exclusive)
 
         self.ae_blocks = (6, 4, 4)
         self.ae_heads = 12
@@ -68,7 +67,7 @@ class SpeakerEncoder(nn.Module):
             )]
         self.blocks = nn.ModuleList(blocks)
         self.dropout = nn.Dropout(pars.drop)
-        self.squeeze_k = self.target_sample_len // self.sc_len
+        self.squeeze_k = pars.target_sample_len // pars.sc_len
 
     def forward(self, x: Tensor) -> Tensor:
         out = self.pos_embed(x)
@@ -79,7 +78,7 @@ class SpeakerEncoder(nn.Module):
 
 
 class AudioCoder(nn.Module):
-    def __init__(self, spect_width, hidden_dim_m, heads, fragment_len, drop, blocks_num, cross_n):
+    def __init__(self, spect_width, hidden_dim_m, heads, fragment_len, drop, blocks_num, cross_n, mid_repeat_interval):
         super().__init__()
         assert all([x % 2 == 0 for x in blocks_num]), "Criss-crossing won't work"
 
@@ -98,12 +97,14 @@ class AudioCoder(nn.Module):
         self.blocks_pre = nn.ModuleList(blocks[:blocks_num[0]])
         self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[1]])
         self.blocks_post = nn.ModuleList(blocks[blocks_num[1]:])
+        self.mid_repeat_interval = mid_repeat_interval
+
         self.dropout = nn.Dropout(drop)
 
-    def forward(self, x: Tensor, cross: list[Tensor], mid_times: int):
+    def forward(self, x: Tensor, cross: list[Tensor]):
         for i, block in enumerate(self.blocks_pre):
             x = block(x, cross if i % 2 == 0 else []).T
-        for rep in range(mid_times):
+        for rep in range(self.mid_repeat_interval):
             for i, block in enumerate(self.blocks_pre):
                 x = block(x, cross if i % 2 == 0 else []).T
         for i, block in enumerate(self.blocks_pre):
@@ -114,7 +115,7 @@ class AudioCoder(nn.Module):
 class AudioEncoder(AudioCoder):
     def __init__(self, pars: VoicetronParameters):
         super().__init__(pars.spect_width, pars.ae_hidden_dim_m, pars.ae_heads, pars.fragment_len,
-                         pars.drop, pars.ae_blocks, 1)
+                         pars.drop, pars.ae_blocks, 1, pars.mid_repeat_interval)
 
         self.pos_embed = PositionalEmbedding(
             seq_len=pars.fragment_len,
@@ -124,19 +125,17 @@ class AudioEncoder(AudioCoder):
     def forward(self, x: Tensor, history: Tensor) -> Tensor:
         x = self.pos_embed(x)
         x = self.dropout(x)
-        mid_rep = np.random.randint(self.mid_repeat_min, self.mid_repeat_max + 1)
-        x = super().forward(x, [history], mid_rep)
+        x = super().forward(x, [history])
         return x
 
 
 class AudioDecoder(AudioCoder):
     def __init__(self, pars: VoicetronParameters):
         super().__init__(pars.spect_width, pars.ad_hidden_dim_m, pars.ad_heads, pars.fragment_len,
-                         pars.drop, pars.ad_blocks, 2)
+                         pars.drop, pars.ad_blocks, 2, pars.mid_repeat_interval)
 
     def forward(self, x: Tensor, speaker_characteristic: Tensor, history: Tensor) -> Tensor:
-        mid_rep = np.random.randint(self.mid_repeat_min, self.mid_repeat_max + 1)
-        x = super().forward(x, [speaker_characteristic, history], mid_rep)
+        x = super().forward(x, [speaker_characteristic, history])
         return x
 
 

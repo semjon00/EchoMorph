@@ -8,8 +8,8 @@ if __name__ == '__main__':
     # Example of inference
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ac = AudioConventer(device)
-    target_sample = ac.load_audio('./dataset/example.aac')
-    source = ac.load_audio('./dataset/example2.aac')
+    target_sample = ac.load_audio('./dataset/tests/example1.mp3')
+    source = ac.load_audio('./dataset/tests/example2.mp3')
     ts_x = ac.convert_from_wave(target_sample)
     src_x = ac.convert_from_wave(source)
 
