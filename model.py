@@ -27,7 +27,7 @@ class EchoMorphParameters:
 
         self.drop = 0.05
 
-        self.se_blocks = (8, 0, 0)
+        self.se_blocks = 8
         self.se_heads = 8
         self.se_hidden_dim_m = 3
 
@@ -87,7 +87,7 @@ class AudioCoder(nn.Module):
 class SpeakerEncoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.se_hidden_dim_m, pars.se_heads, pars.target_sample_len,
-                         pars.drop, pars.se_blocks, 0, (0, 1))
+                         pars.drop, (pars.se_blocks, 0, 0), 0, (0, 1))
         self.pos_embed = PositionalEmbedding(
             seq_len=pars.target_sample_len,
             embed_dim=pars.spect_width

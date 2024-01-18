@@ -1,8 +1,11 @@
 import torch
 
-from model import EchoMorph
+from audio import AudioConventer
+from model import EchoMorph, EchoMorphParameters
+import torch
+import os
+import pathlib
 
-# TODO: training might need stuff like this, maybe extract to a separate file
 def crop_from_middle(x, length):
     if x.size(0) < length:
         padding = torch.zeros([(length + 1) // 2, x.size(1)])
@@ -40,3 +43,34 @@ def standard_inference(model: EchoMorph, target_sample, source):
 #        - Mix two (or more) speaker representations
 #        - Allow interpolation across different speaker representations
 #        - Different types of randomized representations
+#       it screams class and inheritance (SpeakerRepresentationProvider -style)
+
+def inference_base(sample_path, source_path):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    ac = AudioConventer(device)
+    target_sample = ac.load_audio(sample_path)
+    source = ac.load_audio(source_path)
+    ts_x = ac.convert_from_wave(target_sample)
+    src_x = ac.convert_from_wave(source)
+
+    root_snapshots = pathlib.Path("snapshots")
+    snapshots = sorted(os.listdir(root_snapshots))
+    if len(snapshots) < 1:
+        print('No model snapshot means no inference is possible.')
+        exit(1)
+
+    directory = root_snapshots / snapshots[-1]
+    print(f'  Loading an EchoMorph model stored in {directory}...')
+
+    with torch.no_grad():
+        model = torch.load(directory / 'model.bin')
+        model.eval()
+        output = standard_inference(model, ts_x, src_x)
+        # output = ts_x
+
+        audio = ac.convert_to_wave(output)
+        ac.save_audio(audio, './dataset/result_temp.wav')
+
+
+if __name__ == '__main__':
+    inference_base('./dataset/tests/example1.mp3', './dataset/tests/example2.mp3')
