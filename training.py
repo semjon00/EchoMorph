@@ -5,27 +5,39 @@ import pathlib
 import torch
 import random
 import pickle
+from torch import Tensor
+from torch.utils.data import DataLoader, Dataset
+import einops
 
 from model import EchoMorph, EchoMorphParameters
 from audio import AudioConventer
 
-allowed_extensions = ['.aac', '.mp3', '.flac']
+# TODO: not optimized at all
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using {device} device")
+ac = AudioConventer(device)
+
+batch_size = 256  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
 
 
 def print(*args):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args)
 
 
+def report(model, consume, loss_val, frags_n):
+    pass  # TODO
+
 def verify_compatibility():
     f = 'NONE'
     try:
-        ac = AudioConventer('cpu')
         tests_dir = pathlib.Path('./dataset/tests')
         for f in os.listdir(tests_dir):
             ac.convert_to_wave(ac.convert_from_wave(ac.load_audio(tests_dir / f)))
     except:
         print(f'Compatibility check FAILED on file {f}')
-        print('Please ensure that ffmpeg (and maybe sox) are installed - these are necessary to read audio files')
+        print('Please ensure that ffmpeg (and maybe sox) are installed - '
+              'these are necessary to read audio files')
         exit(1)
 
 
@@ -41,13 +53,17 @@ def load_progress():
 
         print('  Fetching dataset info...')
         dfiles = list(pathlib.Path("./dataset").rglob("*.*"))
-        ac = AudioConventer('cpu')
-        consume = [(x, 0, ac.total_frames(x)) for x in dfiles
-                   if any([x.parts[-1].endswith(ext) for ext in allowed_extensions]) and
-                   x.parts[-2] != 'tests']
+        allowed_extensions = ['.aac', '.mp3', '.flac']
+        dfiles = [x for x in dfiles
+                  if any([x.parts[-1].endswith(ext) for ext in allowed_extensions])
+                  and x.parts[1] not in ['tests', 'disabled']]
+        consume = [[x, 0, ac.total_frames(x)] for x in dfiles]
+        print('  Saving zero progress...')
+        save_progress(model, consume)
         return model, consume
     else:
         directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
+        print(f'  Loading an EchoMorph model stored in {directory}...')
         model = torch.load(directory / 'model.bin')
         consume = pickle.load(open(directory / 'consume.bin', 'rb'))
         return model, consume
@@ -55,13 +71,14 @@ def load_progress():
 
 def save_progress(model, consume):
     p_snapshots = pathlib.Path("snapshots")
-    directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat()
+    directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat().strip(':').strip('-')
+    os.makedirs(directory, exist_ok=True)
     torch.save(model, directory / 'model.bin')
     pickle.dump(consume, open(directory / 'consume.bin', 'wb'))
     print('Saved progress.')
 
 
-def take_a_bite(ac, consume):
+def take_a_bite(consume):
     """Randomly selects a file from dataset and takes a bite.
     This thing is slow, but it gets the job done"""
     # TODO: Use DataLoader
@@ -73,31 +90,74 @@ def take_a_bite(ac, consume):
     drop = random.randint(0, tot_rem - 1)
     sel = 0
     for i, el in enumerate(consume):
-        if drop < el[2] - el[2]:
+        if drop < el[2] - el[1]:
             sel = i
             break
-        drop -= el[2] - el[2]
+        drop -= el[2] - el[1]
     load_now = load_opt if consume[sel][2] - consume[sel][1] > 2 * load_opt else consume[sel][2]
-    ac.load_audio(consume[sel][0], frame_offset=consume[sel][1], num_frames=load_now)
+    loaded = ac.load_audio(consume[sel][0], frame_offset=consume[sel][1], num_frames=load_now)
     consume[sel][1] += load_now
-    return None
+    return ac.convert_from_wave(loaded)
+
+
+class CustomAudioDataset(Dataset):
+    def __init__(self, train_spect, hl, fl):
+        assert hl % fl == 0, 'Not implemented'
+        chunks_n = train_spect.size(0) // fl
+        train_spect = train_spect[:chunks_n * fl, :]
+
+        chunks = einops.rearrange(train_spect, '(s x) w -> s x w', x=fl)
+        fragments_i = torch.arange(hl // fl, chunks.size(0))
+        self.fragments = chunks[fragments_i, ...]
+        history_i = torch.arange(0, chunks.size(0) - hl // fl).view(-1, 1) + torch.arange(hl // fl)
+        self.history = einops.rearrange(chunks[history_i, ...], '... x s w -> ... (x s) w')
+
+    def __len__(self):
+        return len(self.fragments)
+
+    def __getitem__(self, idx):
+        return self.history[idx], self.fragments[idx]
+
+
+def loss_function(pred, truth):  # TODO: now this is the hard part
+    return 0
+
+def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor):
+    tsl = model.pars.target_sample_len
+    target_sample = train_spect[0:tsl, :]
+
+    hl = model.pars.history_len
+    fl = model.pars.fragment_len
+    dataloader = DataLoader(CustomAudioDataset(train_spect[tsl:, ...], hl=hl, fl=fl),
+                                      batch_size=batch_size, shuffle=True)
+
+    total_loss = 0
+    model.train()
+    for history, fragments in iter(dataloader):
+        optimizer.zero_grad()
+        pred = model(target_sample, history, fragments)
+        loss = loss_function(pred, fragments)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    return total_loss, len(dataloader)
 
 
 def training():
-    print('Training initiated')
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using {device} device")
+    print('Training initiated!')
 
     verify_compatibility()
     print('Compatibility verified.')
 
     model, consume = load_progress()
     print('Loading progress done!')
-    ac = AudioConventer(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.00017)  # TODO: Mess with the gradient application here
 
     while len(consume):
-        train_wav = take_a_bite(ac, consume)
+        train_spect = take_a_bite(consume)
+        loss_val, frags_n = train_on_bite(model, optimizer, train_spect)
+        report(model, consume, loss_val, frags_n)
 
         pass
         # TODO: Load some of the file
@@ -106,7 +166,6 @@ def training():
 
         # TODO: Save occasionally
 
-    batch_size = 256
 
 
 if __name__ == '__main__':
