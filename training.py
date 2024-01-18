@@ -25,8 +25,14 @@ def print(*args):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args)
 
 
-def report(model, consume, loss_val, frags_n):
-    pass  # TODO
+def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
+    # TODO: Isn't it too slow?
+    sum_consume = consume([el[1] for el in consume])
+    tot_consume = consume([el[2] for el in consume])
+    percent_consumed = 100 * sum_consume / tot_consume
+    fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
+    print(f'Report | {percent_consumed:2.3f}% | {avg_loss:3.3f} loss on {fn_string}')
+
 
 def verify_compatibility():
     f = 'NONE'
@@ -60,12 +66,15 @@ def load_progress():
         consume = [[x, 0, ac.total_frames(x)] for x in dfiles]
         print('  Saving zero progress...')
         save_progress(model, consume)
+        print('Training initialized!')
         return model, consume
     else:
+        # TODO: does not allow new files in consume
         directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
         print(f'  Loading an EchoMorph model stored in {directory}...')
         model = torch.load(directory / 'model.bin')
         consume = pickle.load(open(directory / 'consume.bin', 'rb'))
+        print('Loading progress done!')
         return model, consume
 
 
@@ -87,6 +96,9 @@ def take_a_bite(consume):
     load_opt = 45678 * 300  # About 5 minutes, don't care about the bitrate and the exact value
 
     tot_rem = sum([el[2] - el[1] for el in consume])
+    if tot_rem == 0:
+        return None, None
+
     drop = random.randint(0, tot_rem - 1)
     sel = 0
     for i, el in enumerate(consume):
@@ -97,7 +109,7 @@ def take_a_bite(consume):
     load_now = load_opt if consume[sel][2] - consume[sel][1] > 2 * load_opt else consume[sel][2]
     loaded = ac.load_audio(consume[sel][0], frame_offset=consume[sel][1], num_frames=load_now)
     consume[sel][1] += load_now
-    return ac.convert_from_wave(loaded)
+    return ac.convert_from_wave(loaded), consume[sel]
 
 
 class CustomAudioDataset(Dataset):
@@ -122,6 +134,7 @@ class CustomAudioDataset(Dataset):
 def loss_function(pred, truth):  # TODO: now this is the hard part
     return 0
 
+
 def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor):
     tsl = model.pars.target_sample_len
     target_sample = train_spect[0:tsl, :]
@@ -140,7 +153,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-    return total_loss, len(dataloader)
+    return total_loss / len(dataloader)
 
 
 def training():
@@ -150,22 +163,22 @@ def training():
     print('Compatibility verified.')
 
     model, consume = load_progress()
-    print('Loading progress done!')
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.00017)  # TODO: Mess with the gradient application here
+    # TODO: Mess with the gradient application here
+    # TODO: Adjust learning rate
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.00017)
 
-    while len(consume):
-        train_spect = take_a_bite(consume)
-        loss_val, frags_n = train_on_bite(model, optimizer, train_spect)
-        report(model, consume, loss_val, frags_n)
+    while True:
+        train_spect, origin = take_a_bite(consume)
+        if origin is None:
+            break
 
-        pass
-        # TODO: Load some of the file
-        # TODO: Train on it a bit (like, 10 minutes maybe?)
-        # TODO: Save consume progress
+        avg_loss = train_on_bite(model, optimizer, train_spect)
+        report(model, consume, avg_loss, origin[0])
 
         # TODO: Save occasionally
-
+    save_progress(model, consume)
+    print('Training finished! ')
 
 
 if __name__ == '__main__':
