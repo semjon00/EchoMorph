@@ -14,14 +14,13 @@ import einops
 from model import EchoMorph, EchoMorphParameters
 from audio import AudioConventer
 
-# TODO: not optimized at all
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
 ac = AudioConventer(device)
 
 batch_size = 128  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
-learning_rate = 0.00017  # Universal, repeating blocks get more probably
+# TODO: Adjust learning rate
+learning_rate = 0.00017  # Universal
 save_time = 60 * 60
 
 def print(*args):
@@ -29,7 +28,6 @@ def print(*args):
 
 
 def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
-    # TODO: Isn't it too slow?
     sum_consume = consume([el[1] for el in consume])
     tot_consume = consume([el[2] for el in consume])
     percent_consumed = 100 * sum_consume / tot_consume
@@ -51,7 +49,6 @@ def verify_compatibility():
 
 
 def load_progress():
-    # TODO: initialize or load a saved model
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
     if len(os.listdir(p_snapshots)) == 0:
@@ -93,8 +90,7 @@ def save_progress(model, consume):
 def take_a_bite(consume):
     """Randomly selects a file from dataset and takes a bite.
     This thing is slow, but it gets the job done"""
-    # TODO: Use DataLoader
-    # TODO: Custom priority
+    # TODO: Setting custom priority for files
 
     load_opt = 45678 * 300  # About 5 minutes, don't care about the bitrate and the exact value
 
@@ -134,7 +130,8 @@ class CustomAudioDataset(Dataset):
         return self.history[idx], self.fragments[idx]
 
 
-def loss_function(pred, truth):  # TODO: now this is the hard part, make it reasonable
+def loss_function(pred, truth):
+    # TODO: now this is the hard part, make it more reasonable
     loss = torch.mean((pred - truth)**2)
     return loss
 
@@ -155,6 +152,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
         pred = model(target_sample, history, fragments)
         loss = loss_function(pred, fragments)
         loss.backward()
+        # TODO: repeating blocks will have way bigger effective learning rate
         optimizer.step()
         total_loss += loss.item()
     return total_loss / len(dataloader)
@@ -169,8 +167,6 @@ def training():
     model, consume = load_progress()
     last_save = time.time()
 
-    # TODO: Mess with the gradient application here
-    # TODO: Adjust learning rate
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     while True:

@@ -7,10 +7,9 @@ import random
 from transformer_blocks import PositionalEmbedding, TransformerBlock
 
 # TODO: We have a bottleneck in the middle of the model
-# TODO: SpeakerEncoder also reduces input size 4-fold
-# TODO: We totally should make block sizes different
-
-# TODO: Consumes unholy amounts of memory.
+#       SpeakerEncoder also reduces input size 4-fold
+#       We totally should make block sizes different
+#       Currently it consumes too much memory.
 
 # TODO: Maybe use intermediate representation for autoregressive feeding of history?
 
