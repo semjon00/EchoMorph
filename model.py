@@ -189,7 +189,7 @@ class EchoMorph(nn.Module):
         self.audio_decoder = AudioDecoder(pars)
 
     def forward(self, target_sample, source_history, source_fragment, target_history=None):
-        """Used for training, use inference.py for usage"""
+        """Used for training, use inference.py for inference"""
         if target_history is None:
             target_history = source_history
 

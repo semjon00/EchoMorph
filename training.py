@@ -2,6 +2,8 @@ import builtins
 import datetime
 import os
 import pathlib
+import time
+
 import torch
 import random
 import pickle
@@ -19,7 +21,8 @@ print(f"Using {device} device")
 ac = AudioConventer(device)
 
 batch_size = 256  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
-
+learning_rate = 0.00017  # Universal
+save_time = 60 * 60
 
 def print(*args):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args)
@@ -131,8 +134,9 @@ class CustomAudioDataset(Dataset):
         return self.history[idx], self.fragments[idx]
 
 
-def loss_function(pred, truth):  # TODO: now this is the hard part
-    return 0
+def loss_function(pred, truth):  # TODO: now this is the hard part, make it reasonable
+    loss = torch.mean((pred - truth)**2)
+    return loss
 
 
 def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor):
@@ -163,10 +167,11 @@ def training():
     print('Compatibility verified.')
 
     model, consume = load_progress()
+    last_save = time.time()
 
     # TODO: Mess with the gradient application here
     # TODO: Adjust learning rate
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.00017)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     while True:
         train_spect, origin = take_a_bite(consume)
@@ -175,10 +180,11 @@ def training():
 
         avg_loss = train_on_bite(model, optimizer, train_spect)
         report(model, consume, avg_loss, origin[0])
-
-        # TODO: Save occasionally
+        if last_save < time.time() - last_save:
+            last_save = time.time()
+            save_progress(model, consume)
     save_progress(model, consume)
-    print('Training finished! ')
+    print('Training finished!')
 
 
 if __name__ == '__main__':
