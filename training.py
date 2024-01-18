@@ -20,8 +20,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
 ac = AudioConventer(device)
 
-batch_size = 256  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
-learning_rate = 0.00017  # Universal
+batch_size = 128  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
+learning_rate = 0.00017  # Universal, repeating blocks get more probably
 save_time = 60 * 60
 
 def print(*args):
@@ -58,7 +58,7 @@ def load_progress():
         # Initialize new model and fresh dataset consuming progress
         print('  Initializing a new EchoMorph model...')
         pars = EchoMorphParameters()
-        model = EchoMorph(pars)
+        model = EchoMorph(pars).to(device)
 
         print('  Fetching dataset info...')
         dfiles = list(pathlib.Path("./dataset").rglob("*.*"))

@@ -24,6 +24,7 @@ class EchoMorphParameters:
         self.spect_width = 512  # x_width
 
         self.sc_len = self.target_sample_len // 4  # Speaker characteristic
+        self.ir_width = self.spect_width // 4  # Intermediate representation
 
         self.drop = 0.1
 
@@ -42,7 +43,7 @@ class EchoMorphParameters:
         self.ad_hidden_dim_m = 3
 
         self.rm_k_min = 0
-        self.rm_k_max = 1 / 2
+        self.rm_k_max = 3 / 4
         self.rm_fun = 'exp'
 
 
@@ -73,7 +74,7 @@ class SpeakerEncoder(nn.Module):
         x = self.pos_embed(x)
         x = self.dropout(x)
         for block in self.blocks:
-            x = block(x).T
+            x = torch.transpose(block(x), -1, -2)
         x = einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
         return x
 
@@ -104,13 +105,13 @@ class AudioCoder(nn.Module):
 
     def forward(self, x: Tensor, cross: list[Tensor]):
         for i, block in enumerate(self.blocks_pre):
-            x = block(x, cross if i % 2 == 0 else []).T
+            x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         mid_times = random.randint(*self.mid_repeat_interval)
         for rep in range(mid_times):
             for i, block in enumerate(self.blocks_pre):
-                x = block(x, cross if i % 2 == 0 else []).T
+                x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         for i, block in enumerate(self.blocks_pre):
-            x = block(x, cross if i % 2 == 0 else []).T
+            x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         return x
 
 
@@ -118,16 +119,17 @@ class AudioEncoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.ae_hidden_dim_m, pars.ae_heads, pars.fragment_len,
                          pars.drop, pars.ae_blocks, 1, pars.mid_repeat_interval)
-
         self.pos_embed = PositionalEmbedding(
             seq_len=pars.fragment_len,
             embed_dim=pars.spect_width
         )
+        self.out_w = pars.ir_width
 
     def forward(self, x: Tensor, history: Tensor) -> Tensor:
         x = self.pos_embed(x)
         x = self.dropout(x)
         x = super().forward(x, [history])
+        x[..., self.out_w:] = 0
         return x
 
 

@@ -14,10 +14,10 @@ if __name__ == '__main__':
     src_x = ac.convert_from_wave(source)
 
     pars = EchoMorphParameters()
-    model = EchoMorph(pars)
-    model.eval()
-
-    output = standard_inference(model, ts_x, src_x)
+    model = EchoMorph(pars).to(device)
+    with torch.no_grad():
+        model.eval()
+        output = standard_inference(model, ts_x, src_x)
     #output = ts_x
 
     audio = ac.convert_to_wave(output)
