@@ -108,7 +108,8 @@ class TransformerBlock(nn.Module):
         hidden_dim: int,
         attn_drop: float,
         drop: float,
-        n_cross_attn_blocks: int = 0
+        n_cross_attn_blocks: int = 0,
+        do_norm: bool = True
     ):
         super().__init__()
         self.self_attn = SelfAttention(embed_dim, num_heads, attn_drop)
@@ -123,7 +124,7 @@ class TransformerBlock(nn.Module):
 
         self.ffn = FeedForward(embed_dim, hidden_dim)
         self.ffn_dropout = nn.Dropout(p=drop)
-        self.ffn_norm = nn.LayerNorm(embed_dim)
+        self.ffn_norm = nn.LayerNorm(embed_dim) if do_norm else None
 
     def forward(self, layer_input: T, cross_attn_inputs: [T] = []) -> T:
         res = layer_input
@@ -139,6 +140,7 @@ class TransformerBlock(nn.Module):
         res = out
         out = self.ffn(out)
         out = self.ffn_dropout(out)
-        out = self.ffn_norm(out + res)
+        if self.ffn_norm is not None:
+            out = self.ffn_norm(out + res)
 
         return out
