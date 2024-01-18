@@ -3,10 +3,10 @@ import torchaudio
 import torchaudio.transforms as transforms
 
 class AudioConventer:
-    def __init__(self, x_device):
-        self.sample_rate = 32000
-        self.n_fft = 510
-        self.hop_length = self.n_fft // 5
+    def __init__(self, x_device, sample_rate=32000, width=512, stretch=5):
+        self.sample_rate = sample_rate
+        self.n_fft = width - 2
+        self.hop_length = self.n_fft // stretch
         self.device = x_device
         self.dtype = torch.float32
         self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None)
@@ -28,7 +28,8 @@ class AudioConventer:
 
     def convert_to_wave(self, x):
         split_size = x.size(1) // 2
-        sg = torch.complex(x[..., :split_size], x[..., split_size:]).T
+        # There is no such thing as negative amplitude
+        sg = torch.complex(torch.clamp(x[..., :split_size], min=0), x[..., split_size:]).T
         wv = self.transform_from(sg)
         return wv
 

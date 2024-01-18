@@ -17,14 +17,24 @@ def standard_inference(model: EchoMorph, target_sample, source):
 
     hl = model.pars.history_len
     fl = model.pars.fragment_len
-    source = torch.cat((torch.zeros([hl, source.size(1)]), source), dim=0)
+    # source_length = len(source)
+
+    # Padding the source so we have empty history beforehand and some space after the end
+    source = torch.cat((torch.zeros([hl, source.size(1)]), source, torch.zeros([fl, source.size(1)])), dim=0)
     target = torch.zeros_like(source)
 
+    print('Inferencing: [', end='')
     for cur in range(hl, target.size(0), fl):
         intermediate = model.rando_mask(model.audio_encoder(source[cur:cur+fl, :], source[cur-hl:cur, :]))
         target[cur:cur+fl, :] = model.audio_decoder(intermediate, speaker_characteristic, target[cur-hl:cur, :])
+        print('.', end='')
+    print(']')
+    print('Done!')
 
+    # Maybe don't actually truncate the last fragment, what if there is useful signal there?
     return target[hl:, ...]
+
+# TODO: set eval parameters before launching the model (mid blocks repeat, randomask values)
 
 # TODO: allow replacing the target_sample with some nonsense:
 #        - Mix two (or more) speaker representations

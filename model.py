@@ -23,12 +23,12 @@ class EchoMorphParameters:
         self.fragment_len = one_sec_len // 4
         self.spect_width = 512  # x_width
 
-        self.sc_len = self.target_sample_len // 4  # Speaker characteristic
-        self.ir_width = self.spect_width // 4  # Intermediate representation
+        self.sc_len = self.target_sample_len // 4  # Speaker characteristic shrink
+        self.ir_width = self.spect_width // 4  # Intermediate representation allowance
 
-        self.drop = 0.1
+        self.drop = 0.05
 
-        self.se_blocks = 8
+        self.se_blocks = (8, 0, 0)
         self.se_heads = 8
         self.se_hidden_dim_m = 3
 
@@ -47,46 +47,14 @@ class EchoMorphParameters:
         self.rm_fun = 'exp'
 
 
-class SpeakerEncoder(nn.Module):
-    def __init__(self, pars: EchoMorphParameters):
-        super().__init__()
-
-        self.pos_embed = PositionalEmbedding(
-            seq_len=pars.target_sample_len,
-            embed_dim=pars.spect_width
-        )
-        blocks = []
-        assert pars.se_blocks % 2 == 0, "Criss-crossing won't work"
-        for i in range(pars.se_blocks):
-            ed = pars.spect_width if i % 2 == 0 else pars.target_sample_len
-            blocks += [TransformerBlock(
-                embed_dim=ed,
-                num_heads=pars.se_heads,
-                hidden_dim=ed * pars.se_hidden_dim_m,
-                attn_drop=pars.drop,
-                drop=pars.drop
-            )]
-        self.blocks = nn.ModuleList(blocks)
-        self.dropout = nn.Dropout(pars.drop)
-        self.squeeze_k = pars.target_sample_len // pars.sc_len
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.pos_embed(x)
-        x = self.dropout(x)
-        for block in self.blocks:
-            x = torch.transpose(block(x), -1, -2)
-        x = einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
-        return x
-
-
 class AudioCoder(nn.Module):
-    def __init__(self, spect_width, hidden_dim_m, heads, fragment_len, drop, blocks_num, cross_n, mid_repeat_interval):
+    def __init__(self, spect_width, hidden_dim_m, heads, spect_len, drop, blocks_num, cross_n, mid_repeat_interval):
         super().__init__()
         assert all([x % 2 == 0 for x in blocks_num]), "Criss-crossing won't work"
 
         blocks = []
         for i in range(sum(blocks_num)):
-            ed = spect_width if i % 2 == 0 else fragment_len
+            ed = spect_width if i % 2 == 0 else spect_len
             this_cross_n = cross_n if i % 2 == 0 else 0
             blocks += [TransformerBlock(
                 embed_dim=ed,
@@ -114,6 +82,23 @@ class AudioCoder(nn.Module):
             x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         return x
 
+class SpeakerEncoder(AudioCoder):
+    def __init__(self, pars: EchoMorphParameters):
+        super().__init__(pars.spect_width, pars.se_hidden_dim_m, pars.se_heads, pars.target_sample_len,
+                         pars.drop, pars.se_blocks, 0, (0, 1))
+        self.pos_embed = PositionalEmbedding(
+            seq_len=pars.target_sample_len,
+            embed_dim=pars.spect_width
+        )
+        self.dropout = nn.Dropout(pars.drop)
+        self.squeeze_k = pars.target_sample_len // pars.sc_len
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.pos_embed(x)
+        x = self.dropout(x)
+        x = super().forward(x, [])
+        x = einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
+        return x
 
 class AudioEncoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
