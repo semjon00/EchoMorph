@@ -78,9 +78,9 @@ class AudioCoder(nn.Module):
             x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         mid_times = random.randint(*self.mid_repeat_interval)
         for rep in range(mid_times):
-            for i, block in enumerate(self.blocks_pre):
+            for i, block in enumerate(self.blocks_mid):
                 x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
-        for i, block in enumerate(self.blocks_pre):
+        for i, block in enumerate(self.blocks_post):
             x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         return x
 
