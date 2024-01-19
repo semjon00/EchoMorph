@@ -23,8 +23,8 @@ batch_size = 128  # Applies to AudioEncoder and AudioDecoder, does not apply to 
 learning_rate = 0.00017  # Universal
 save_time = 60 * 60
 
-def print(*args):
-    builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args)
+def print(*args, **kwargs):
+    builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
 
 
 def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
@@ -48,6 +48,14 @@ def verify_compatibility():
         exit(1)
 
 
+def get_dataset_files():
+    dfiles = list(pathlib.Path("./dataset").rglob("*.*"))
+    allowed_extensions = ['.aac', '.mp3', '.flac']
+    dfiles = [x for x in dfiles
+              if any([x.parts[-1].endswith(ext) for ext in allowed_extensions])
+              and x.parts[1] not in ['tests', 'disabled']]
+    return dfiles
+
 def load_progress():
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
@@ -57,23 +65,29 @@ def load_progress():
         pars = EchoMorphParameters()
         model = EchoMorph(pars).to(device)
 
-        print('  Fetching dataset info...')
-        dfiles = list(pathlib.Path("./dataset").rglob("*.*"))
-        allowed_extensions = ['.aac', '.mp3', '.flac']
-        dfiles = [x for x in dfiles
-                  if any([x.parts[-1].endswith(ext) for ext in allowed_extensions])
-                  and x.parts[1] not in ['tests', 'disabled']]
+        print('  Fetching dataset info... ', end='')
+        dfiles = get_dataset_files()
+        print(f'for {len(dfiles)} new files...')
         consume = [[x, 0, ac.total_frames(x)] for x in dfiles]
+
         print('  Saving zero progress...')
         save_progress(model, consume)
         print('Training initialized!')
         return model, consume
     else:
-        # TODO: does not allow new files in consume
         directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
         print(f'  Loading an EchoMorph model stored in {directory}...')
         model = torch.load(directory / 'model.bin')
+
         consume = pickle.load(open(directory / 'consume.bin', 'rb'))
+        print('  Fetching extra info... ', end='')
+        new_dfiles = [x for x in get_dataset_files() if x not in [y[0] for y in consume]]
+        if len(new_dfiles) > 0:
+            print(f'for {len(new_dfiles)} new files...')
+            new_dfiles = [[x, 0, ac.total_frames(x)] for x in new_dfiles]
+            consume.extend(new_dfiles)
+        else:
+            print('')
         print('Loading progress done!')
         return model, consume
 
@@ -90,8 +104,6 @@ def save_progress(model, consume):
 def take_a_bite(consume):
     """Randomly selects a file from dataset and takes a bite.
     This thing is slow, but it gets the job done"""
-    # TODO: Setting custom priority for files
-
     load_opt = 45678 * 300  # About 5 minutes, don't care about the bitrate and the exact value
 
     tot_rem = sum([el[2] - el[1] for el in consume])

@@ -57,6 +57,7 @@ class FeedForward(nn.Sequential):
 
 
 class CrossAttention(nn.Module):
+    """Cross attention and also the following normalization layer"""
     def __init__(
             self, 
             embed_dim: int, 
@@ -95,7 +96,7 @@ class CrossAttention(nn.Module):
         out = self.head_merging(out)
         out = self.proj_out(out)
         out = self.drop(out)
-        out = self.norm(out + res)  # TODO: Why is this norm layer here, but not in the self-attention?
+        out = self.norm(out + res)
 
         return out
 
