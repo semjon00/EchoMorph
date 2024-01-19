@@ -14,6 +14,7 @@ from transformer_blocks import PositionalEmbedding, TransformerBlock
 # TODO: Maybe use intermediate representation for autoregressive feeding of history?
 
 class EchoMorphParameters:
+    """Training parameters"""
     def __init__(self):
         one_sec_len = (32000 // 105) // 32 * 32  # sample_rate / hop_length; approximately
 
@@ -72,6 +73,9 @@ class AudioCoder(nn.Module):
         self.mid_repeat_interval = mid_repeat_interval
 
         self.dropout = nn.Dropout(drop)
+
+    def set_mid_repeat_interval(self, new_val):
+        self.mid_repeat_interval = (new_val, new_val + 1)
 
     def forward(self, x: Tensor, cross: list[Tensor]):
         for i, block in enumerate(self.blocks_pre):

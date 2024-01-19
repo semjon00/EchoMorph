@@ -96,7 +96,14 @@ class InferenceFreestyle:
         torch.clamp(obj, min=o_min, max=o_max)
         self.to_bank('c', obj, f'Forged from {name} by applying {p:.3f} grams of pure chaos')
 
-    def infer(self, sc_name, source_name):
+    def infer(self, sc_name, source_name, tradeoff: float = 0.5, quality: int = 10):
+        # Updating model settings
+        assert 0 <= quality
+        for mp in [self.model.audio_encoder, self.model.audio_decoder]:
+            mp.set_mid_repeat_interval(quality)
+        assert 0.0 <= tradeoff <= 1.0
+        self.model.rando_mask.set_p(tradeoff)
+
         hl = self.model.pars.history_len
         fl = self.model.pars.fragment_len
 
@@ -171,7 +178,13 @@ if __name__ == '__main__':
                 case 'infer':
                     # TODO: sloppy syntax - use sample as characteristic (derive beforehand)
                     # TODO: sloppy syntax - swap arguments, figure out by first letter
-                    freestyle.infer(cmd[1], cmd[2])
+                    mods = {}
+                    for mod in cmd[3:]:
+                        if mod.startswith('q='):
+                            mods['quality'] = int(mod[2:])
+                        if mod.startswith('t='):
+                            mods['tradeoff'] = float(mod[2:])
+                    freestyle.infer(cmd[1], cmd[2], **mods)
                 case 'list':
                     raise NotImplementedError()
                 case 'clear':
