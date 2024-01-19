@@ -143,8 +143,24 @@ class CustomAudioDataset(Dataset):
 
 
 def loss_function(pred, truth):
-    # TODO: now this is the hard part, make it more reasonable
-    loss = torch.mean((pred - truth)**2)
+    """Custom loss function, for comparing two spectrograms. Not the best one, but it should work."""
+    width = pred.size(-1) // 2
+
+    # This amp code is no more sane than the person who wrote it was when they wrote it
+    amp_distance = truth[..., :width] - pred[..., :width]
+    # Undershoot = bad; overshoot = veeeery baaaad
+    amp_distance = torch.max(amp_distance, 3 * (-amp_distance)) * 12
+    if amp_distance.max() > 10:
+        amp_distance = amp_distance / (amp_distance.max() / 10.0)
+
+    # Phase part of the spectrogram works like a circle.
+    phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
+    phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)  # Clamp to [0;1], where 1 is the opposite phase
+    # Correct phase is not as important as correct amplitude
+
+    # We want to minimize distance squared.
+    # Phase is not as important as amplitude
+    loss = torch.mean(torch.cat([amp_distance, phase_distance]) ** 2)
     return loss
 
 
