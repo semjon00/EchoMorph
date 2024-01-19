@@ -67,8 +67,8 @@ class AudioCoder(nn.Module):
                 do_norm=dn
             )]
         self.blocks_pre = nn.ModuleList(blocks[:blocks_num[0]])
-        self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[1]])
-        self.blocks_post = nn.ModuleList(blocks[blocks_num[1]:])
+        self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[0]+blocks_num[1]])
+        self.blocks_post = nn.ModuleList(blocks[blocks_num[0]+blocks_num[1]:])
         self.mid_repeat_interval = mid_repeat_interval
 
         self.dropout = nn.Dropout(drop)
