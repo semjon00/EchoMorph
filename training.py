@@ -173,6 +173,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
     dataloader = DataLoader(CustomAudioDataset(train_spect[tsl:, ...], hl=hl, fl=fl),
                                       batch_size=batch_size, shuffle=True)
 
+    # TODO: add training in .half() mode
     total_loss = 0
     model.train()
     for history, fragments in iter(dataloader):

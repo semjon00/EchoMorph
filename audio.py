@@ -3,12 +3,12 @@ import torchaudio
 import torchaudio.transforms as transforms
 
 class AudioConventer:
-    def __init__(self, x_device, sample_rate=32000, width=512, stretch=5):
+    def __init__(self, device, dtype=torch.float32, sample_rate=32000, width=512, stretch=5):
         self.sample_rate = sample_rate
         self.n_fft = width - 2
         self.hop_length = self.n_fft // stretch
-        self.device = x_device
-        self.dtype = torch.float32
+        self.device = device
+        self.dtype = dtype
         self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None)
         self.transform_from = transforms.InverseSpectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
         self.log10 = torch.log(torch.tensor(10))
