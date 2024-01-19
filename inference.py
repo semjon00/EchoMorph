@@ -1,7 +1,5 @@
-import torch
-
 from audio import AudioConventer
-from model import EchoMorph, EchoMorphParameters
+from model import EchoMorph
 import torch
 import os
 import pathlib
@@ -41,11 +39,14 @@ def standard_inference(model: EchoMorph, target_sample, source):
 
 # TODO: allow replacing the target_sample with some nonsense:
 #        - Mix two (or more) speaker representations
-#        - Allow interpolation across different speaker representations
+#        - Allow interpolation across different speaker representations (time-axis)
+#        - Add some noise to the representation
 #        - Different types of randomized representations
 #       it screams class and inheritance (SpeakerRepresentationProvider -style)
 
-def inference_base(sample_path, source_path):
+# TODO: feeding fake history
+
+def inference_base(sample_path, source_path, save_path):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ac = AudioConventer(device)
     target_sample = ac.load_audio(sample_path)
@@ -73,4 +74,15 @@ def inference_base(sample_path, source_path):
 
 
 if __name__ == '__main__':
-    inference_base('./dataset/tests/example1.mp3', './dataset/tests/example2.mp3')
+    print('=== EchoMorph inference demo ===')
+
+    src = input('Speech file path: ')
+    if len(src) < 1:
+        src = './dataset/tests/example1.mp3'
+        tgt_s = './dataset/tests/example2.mp3'
+        save = './dataset/result_temp.wav'
+    else:
+        tgt_s = input('Speaker file path: ')
+        save = input('Save into: ')
+
+    inference_base(src, tgt_s, save)
