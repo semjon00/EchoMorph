@@ -5,7 +5,8 @@ import pathlib
 import sys
 
 from audio import AudioConventer
-from model import EchoMorph
+from model import EchoMorph, EchoMorphParameters
+
 
 def play_audio(filename):
     import subprocess
@@ -31,14 +32,16 @@ class InferenceFreestyle:
         self.ac = AudioConventer(device)
 
         root_snapshots = pathlib.Path("snapshots")
-        snapshots = sorted(os.listdir(root_snapshots))
-        if len(snapshots) < 1:
+        if not root_snapshots.is_dir() or len(os.listdir(root_snapshots)) == 0:
             print('No model snapshot means no inference is possible.')
+            print('Put a snapshot into the snapshots folder.')
             exit(1)
 
-        directory = root_snapshots / snapshots[-1]
+        directory = root_snapshots / sorted(os.listdir(root_snapshots))[-1]
         print(f'Loading an EchoMorph model stored in {directory}... ', end='')
-        self.model = torch.load(directory / 'model.bin')
+        training_parameters = EchoMorphParameters()  #TODO: inference parameters
+        self.model = EchoMorph(training_parameters)
+        self.model.load_state_dict(torch.load(directory / 'model.bin'))
         self.model.eval()
         print('Done!')
 

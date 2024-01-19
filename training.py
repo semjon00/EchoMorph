@@ -77,7 +77,9 @@ def load_progress():
     else:
         directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
         print(f'  Loading an EchoMorph model stored in {directory}...')
-        model = torch.load(directory / 'model.bin')
+        training_parameters = EchoMorphParameters()
+        model = EchoMorph(training_parameters)
+        model.load_state_dict(torch.load(directory / 'model.bin'))
 
         consume = pickle.load(open(directory / 'consume.bin', 'rb'))
         print('  Fetching extra info... ', end='')
@@ -96,7 +98,7 @@ def save_progress(model, consume):
     p_snapshots = pathlib.Path("snapshots")
     directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat().strip(':').strip('-')
     os.makedirs(directory, exist_ok=True)
-    torch.save(model, directory / 'model.bin')
+    torch.save(model.state_dict(), directory / 'model.bin')
     pickle.dump(consume, open(directory / 'consume.bin', 'wb'))
     print('Saved progress.')
 
