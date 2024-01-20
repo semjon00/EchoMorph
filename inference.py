@@ -1,4 +1,3 @@
-import pickle
 import torch
 import os
 import pathlib
@@ -118,6 +117,7 @@ class InferenceFreestyle:
         self.to_bank('c', obj, f'Forged from {name} by applying {p:.3f} grams of pure chaos')
 
     def infer(self, sc_name, source_name, tradeoff: float = 0.5, quality: int = 10, radiation: float = 0):
+        # TODO: multi-merge (averaging multiple infer-s with slightly different windowing)
         # Updating model settings
         assert 0 <= quality
         for mp in [self.model.audio_encoder, self.model.audio_decoder]:

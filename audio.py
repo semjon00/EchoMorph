@@ -53,7 +53,7 @@ class AudioConventer:
         """Reverses convert_from_wave"""
         split_size = x.size(1) // 2
         magnitude = x[..., :split_size] * 12 - 10
-        magnitude = (magnitude * self.log10).exp()
+        magnitude = torch.clamp((magnitude * self.log10).exp(), max=100.0)
         phase = x[..., split_size:] * torch.pi
 
         real_part = magnitude * torch.cos(phase)

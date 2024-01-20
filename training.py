@@ -158,20 +158,40 @@ class CustomAudioDataset(Dataset):
         return self.history[idx], self.fragments[idx]
 
 
+loss_function_freq_significance_cache = None
+def loss_function_freq_significance(width):
+    global loss_function_freq_significance_cache
+    if loss_function_freq_significance_cache is None or loss_function_freq_significance_cache[0] != width:
+        vals = torch.arange(start=2.0, end=0, step=-2.0 / width).exp()
+        vals = vals / torch.sum(vals) * width
+        loss_function_freq_significance_cache = width, vals
+    return loss_function_freq_significance_cache[1]
+
+
 def loss_function(pred, truth):
     """Custom loss function, for comparing two spectrograms. Not the best one, but it should work."""
+    # TODO: this can be infinitely improved:
+    #  * equal-loudness contour
+    #  * auditory masking
+    #  * jitter in neighbor values across time-domain
+    #  * slightly different pitch is not too bad
     width = pred.size(-1) // 2
 
     # This amp code is no more sane than the person who wrote it was when they wrote it
+    # Pretty much all the things are eye-balled and not rigorously determined
     amp_distance = truth[..., :width] - pred[..., :width]
     # Undershoot = bad; overshoot = veeeery baaaad
-    amp_distance = torch.max(amp_distance, 3 * (-amp_distance)) * 12
-    if amp_distance.max() > 10:
-        amp_distance = amp_distance / (amp_distance.max() / 10.0)
+    # Large overshoot = "masked"
+    amp_distance = torch.max(torch.clamp(amp_distance, max=0.25), 3.0 * (-amp_distance)) * 12
+    # Frequency ranges are not created equal
+    amp_distance = torch.clamp(amp_distance, max=10)
+    amp_distance *= loss_function_freq_significance(width)
 
     # Phase part of the spectrogram works like a circle.
     phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
-    phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)  # Clamp to [0;1], where 1 is the opposite phase
+    # Clamp to [0;1], where 1 is the opposite phase
+    phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
+    phase_distance *= loss_function_freq_significance(width)
     # Correct phase is not as important as correct amplitude
 
     # We want to minimize distance squared.
