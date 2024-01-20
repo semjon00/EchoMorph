@@ -22,6 +22,7 @@ batch_size = 128  # Applies to AudioEncoder and AudioDecoder, does not apply to 
 # TODO: Adjust learning rate
 learning_rate = 0.00017  # Universal
 save_time = 60 * 60
+epoch_number = 0  # Increase if you want to train on the same dataset again
 
 def print(*args, **kwargs):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
@@ -33,6 +34,12 @@ def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
     percent_consumed = 100 * sum_consume / tot_consume
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
     print(f'Report | {percent_consumed:2.3f}% | {avg_loss:3.3f} loss on {fn_string}')
+
+
+def upd_timings(timings, name, start_time):
+    if name not in timings:
+        timings[name] = 0
+    timings[name] += time.time() - start_time
 
 
 def verify_compatibility():
@@ -68,7 +75,7 @@ def load_progress():
         print('  Fetching dataset info... ', end='')
         dfiles = get_dataset_files()
         print(f'for {len(dfiles)} new files...')
-        consume = [[x, 0, ac.total_frames(x)] for x in dfiles]
+        consume = [[x, epoch_number * 7, ac.total_frames(x)] for x in dfiles]
 
         print('  Saving zero progress...')
         save_progress(model, consume)
@@ -103,6 +110,12 @@ def save_progress(model, consume):
     print('Saved progress.')
 
 
+def random_degradation_value():
+    # Eyeballed
+    r = random.random()
+    return min((r ** 1.5) + 0.2, 1.000001)
+
+
 def take_a_bite(consume):
     """Randomly selects a file from dataset and takes a bite.
     This thing is slow, but it gets the job done"""
@@ -120,10 +133,11 @@ def take_a_bite(consume):
             break
         drop -= el[2] - el[1]
     load_now = load_opt if consume[sel][2] - consume[sel][1] > 2 * load_opt else consume[sel][2]
-    loaded = ac.load_audio(consume[sel][0], frame_offset=consume[sel][1], num_frames=load_now)
+    loaded = ac.load_audio(consume[sel][0], frame_offset=consume[sel][1], num_frames=load_now,
+                           degrade_keep=random_degradation_value())
     consume[sel][1] += load_now
-    return ac.convert_from_wave(loaded), consume[sel]
-
+    sg = ac.convert_from_wave(loaded)
+    return sg, consume[sel]
 
 class CustomAudioDataset(Dataset):
     def __init__(self, train_spect, hl, fl):
@@ -166,16 +180,19 @@ def loss_function(pred, truth):
     return loss
 
 
-def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor):
+def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
     tsl = model.pars.target_sample_len
     target_sample = train_spect[0:tsl, :]
 
     hl = model.pars.history_len
     fl = model.pars.fragment_len
+    bt = time.time()
     dataloader = DataLoader(CustomAudioDataset(train_spect[tsl:, ...], hl=hl, fl=fl),
                                       batch_size=batch_size, shuffle=True)
+    upd_timings(timings, 'dataloading', bt)
 
     # TODO: add training in .half() mode
+    bt = time.time()
     total_loss = 0
     model.train()
     for history, fragments in iter(dataloader):
@@ -186,6 +203,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
         # TODO: repeating blocks will have way bigger effective learning rate
         optimizer.step()
         total_loss += loss.item()
+    upd_timings(timings, 'training', bt)
     return total_loss / len(dataloader)
 
 
@@ -199,17 +217,20 @@ def training():
     last_save = time.time()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
+    timings = {}
     while True:
+        bt = time.time()
         train_spect, origin = take_a_bite(consume)
+        upd_timings(timings, 'loading', bt)
         if origin is None:
             break
 
-        avg_loss = train_on_bite(model, optimizer, train_spect)
+        avg_loss = train_on_bite(model, optimizer, train_spect, timings)
         report(model, consume, avg_loss, origin[0])
         if last_save < time.time() - last_save:
             last_save = time.time()
             save_progress(model, consume)
+            print(f'Timings: {timings}')
     save_progress(model, consume)
     print('Training finished!')
 
