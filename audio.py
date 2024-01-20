@@ -11,8 +11,15 @@ class AudioConventer:
         self.hop_length = self.n_fft // stretch
         self.device = device
         self.dtype = dtype
-        self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None)
-        self.transform_from = transforms.InverseSpectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
+        
+        self.transform_to = transforms.Spectrogram(
+            n_fft=self.n_fft, hop_length=self.hop_length, power=None
+        ).to(self.device)
+
+        self.transform_from = transforms.InverseSpectrogram(
+            n_fft=self.n_fft, hop_length=self.hop_length
+        ).to(self.device)
+        
         self.log10 = torch.log(torch.tensor(10))
 
     def total_frames(self, path):
@@ -29,10 +36,19 @@ class AudioConventer:
         wv = wv.to(self.device, self.dtype).mean(dim=0)  # To correct device, type, and to mono
         if degrade_keep is not None and degrade_keep < 1.0:
             im_sample_frequency = round(self.sample_rate * degrade_keep)
-            r = transforms.Resample(sr, im_sample_frequency, dtype=self.dtype)(wv)
-            r = transforms.Resample(im_sample_frequency, self.sample_rate, dtype=self.dtype)(r)
+
+            r = transforms.Resample(
+                sr, im_sample_frequency, dtype=self.dtype
+            ).to(self.device)(wv)
+
+            r = transforms.Resample(
+                im_sample_frequency, self.sample_rate, dtype=self.dtype
+            ).to(self.device)(r)
         else:
-            r = transforms.Resample(sr, self.sample_rate, dtype=self.dtype)(wv)
+            r = transforms.Resample(
+                sr, self.sample_rate, dtype=self.dtype
+            ).to(self.device)(wv)
+        
         r = r / max(r.max(), -r.min())
         return r
 
