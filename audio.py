@@ -2,6 +2,8 @@ import torch
 import torchaudio
 import torchaudio.transforms as transforms
 
+AUDIO_FORMATS = ['aac', 'mp3', 'flac', 'wav']
+
 class AudioConventer:
     def __init__(self, device, dtype=torch.float32, sample_rate=32000, width=512, stretch=5):
         self.sample_rate = sample_rate

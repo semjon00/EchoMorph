@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 import einops
 
 from model import EchoMorph, EchoMorphParameters
-from audio import AudioConventer
+from audio import AudioConventer, AUDIO_FORMATS
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
@@ -50,7 +50,7 @@ def verify_compatibility():
 
 def get_dataset_files():
     dfiles = list(pathlib.Path("./dataset").rglob("*.*"))
-    allowed_extensions = ['.aac', '.mp3', '.flac']
+    allowed_extensions = [f'.{x}' for x in AUDIO_FORMATS]
     dfiles = [x for x in dfiles
               if any([x.parts[-1].endswith(ext) for ext in allowed_extensions])
               and x.parts[1] not in ['tests', 'disabled']]

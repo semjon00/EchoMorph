@@ -1,10 +1,10 @@
+import pickle
 import torch
 import os
 import pathlib
-
 import sys
 
-from audio import AudioConventer
+from audio import AudioConventer, AUDIO_FORMATS
 from model import EchoMorph, EchoMorphParameters
 
 
@@ -56,19 +56,34 @@ class InferenceFreestyle:
         print(f'{name}: {recipie}')
         return name
 
-    def load_sample(self, path):
-        wv = self.ac.load_audio(path)
-        sg = self.ac.convert_from_wave(wv)
-        return self.to_bank('s', sg, f'Loaded from {path}')
+    def load(self, path):
+        if path.split('.')[-1] in AUDIO_FORMATS:
+            wv = self.ac.load_audio(path)
+            sg = self.ac.convert_from_wave(wv)
+            return self.to_bank('s', sg, f'Loaded from {path}')
+        elif path.split('.')[-1] in ['emc']:
+            sc = pickle.load(open(path, 'rb'))
+            return self.to_bank('c', sc, f'Loaded from {path}')
+        else:
+            raise NotImplementedError()
 
-    def save_sample(self, name, path):
-        audio = self.ac.convert_to_wave(self.bank[name][0])
-        self.ac.save_audio(audio, path)
+    def save(self, name, path):
+        if name[0] == 's':
+            if path.split('.')[-1] not in AUDIO_FORMATS:
+                path += '.wav'
+            audio = self.ac.convert_to_wave(self.bank[name][0])
+            self.ac.save_audio(audio, path)
+        elif name[0] == 'c':
+            if path.split('.')[-1] not in ['emc']:
+                path += '.emc'
+            pickle.dump(self.bank[name][0], open(path, 'wb'))
+        else:
+            raise NotImplementedError()
 
     def play_sample(self, name):
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmpfile:
-            self.save_sample(name, tmpfile.name)
+            self.save(name, tmpfile.name)
             play_audio(tmpfile.name)
 
     def derive_sc(self, name):
@@ -142,11 +157,11 @@ def demo(freestyle: InferenceFreestyle):
         tgt_s = input('Speaker file path: ')
         save = input('Save into: ')
 
-    tgt_s_n = freestyle.load_sample(tgt_s)
+    tgt_s_n = freestyle.load(tgt_s)
     sc = freestyle.derive_sc(tgt_s_n)
-    src = freestyle.load_sample(src)
+    src = freestyle.load(src)
     out = freestyle.infer(sc, src)
-    freestyle.save_sample(out, save)
+    freestyle.save(out, save)
     freestyle.play_sample(out)
 
 
@@ -161,14 +176,12 @@ if __name__ == '__main__':
                 case 'demo':
                     demo(freestyle)
                 case 'playtest':
-                    s = freestyle.load_sample('./dataset/tests/example1.mp3')
+                    s = freestyle.load('./dataset/tests/example1.mp3')
                     freestyle.play_sample(s)
                 case 'load':
-                    # TODO sc
-                    freestyle.load_sample(cmd[1])
+                    freestyle.load(cmd[1])
                 case 'save':
-                    # TODO: sc
-                    freestyle.save_sample(cmd[1], cmd[2])
+                    freestyle.save(cmd[1], cmd[2])
                 case 'derive':
                     freestyle.derive_sc(cmd[1])
                 case 'merge':
