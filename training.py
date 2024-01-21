@@ -18,9 +18,9 @@ precision = torch.float32 if device == "cpu" else torch.float16
 print(f"Using {device} device with {precision} precision")
 ac = AudioConventer(device, precision)
 
-batch_size = 32  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
+batch_size = 24  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
 # TODO: Adjust learning rate
-learning_rate = 0.0002  # Universal
+learning_rate = 0.0003  # Universal
 save_time = 60 * 60
 
 
@@ -29,33 +29,38 @@ def print(*args, **kwargs):
 
 
 class ConsumeProgress:
-    def __init__(self, names_and_durations, starting_epoch=0):
-        self.starting_epoch = starting_epoch
+    def __init__(self, names_and_durations, total_epochs=3):
+        self.epoch = 0
+        self.total_epochs = total_epochs
         self.paths, self.consumed, self.durations = [], [], []
 
-        self.consumed_duration = 0
-        self.total_duration = 0
+        self.total_consumed = 0
+        self.total_durations = 0
         self.add_files(names_and_durations)
 
     def consumed_prop(self):
-        return self.consumed_duration / self.total_duration
+        return self.epoch + self.total_consumed / self.total_durations
 
     def add_files(self, names_and_durations):
         self.paths += [x[0] for x in names_and_durations]
 
         new_durations = [x[1] for x in names_and_durations]
         self.durations.extend(new_durations)
-        self.total_duration += sum(new_durations)
+        self.total_durations += sum(new_durations)
 
-        new_consumed = [13 * self.starting_epoch for _ in range(len(names_and_durations))]
+        # TODO: new files should be added with "epoch 0", not current epoch
+        new_consumed = [13 * self.epoch for _ in range(len(names_and_durations))]
         self.consumed.extend(new_consumed)
-        self.consumed_duration = sum(new_consumed)
+        self.total_consumed = sum(new_consumed)
 
     def lottery_idx(self):
-        if self.consumed_duration == self.total_duration:
-            return None
+        if self.total_consumed == self.total_durations:
+            if self.epoch_rollover():
+                return self.lottery_idx()
+            else:
+                return None
 
-        tot_rem = self.total_duration - self.consumed_duration
+        tot_rem = self.total_durations - self.total_consumed
         drop = random.randint(0, tot_rem - 1)
         sel = None
         for i in range(len(self.paths)):
@@ -77,19 +82,24 @@ class ConsumeProgress:
             times = int(rem + 1)  # How many bites left to do, does ceiling(rem)
             end = start + (self.durations[idx] - start) // times
         self.consumed[idx] = end
-        self.consumed_duration += end - start
+        self.total_consumed += end - start
         return self.paths[idx], start, end
 
-    def forget(self):
-        self.consumed_duration = 0
-        self.consumed = [0 for _ in range(len(self.consumed))]
+    def epoch_rollover(self):
+        if self.epoch == self.total_epochs:
+            return False
+        self.epoch += 1
+        self.consumed = [13 * self.epoch for _ in range(len(self.consumed))]
+        self.total_consumed = sum(self.consumed)
+        return True
 
 
 def report(optimizer, consume, avg_loss, avg_loss_origin: pathlib.Path):
     percent_consumed = 100 * consume.consumed_prop()
     current_lr = optimizer.param_groups[0]['lr']
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
-    print(f'Report | {percent_consumed:2.3f}% | lr {1e6*current_lr:3.2f}q | {avg_loss:3.5f} loss on "{fn_string}"')
+    avg_loss = "\u221E" if avg_loss is None else f'{avg_loss:03.5f}'
+    print(f'Report | {percent_consumed:02.3f}% | lr {1e6*current_lr:03.2f}q | {avg_loss} loss on "{fn_string}"')
 
 
 def upd_timings(timings, name, start_time):
@@ -101,7 +111,7 @@ def upd_timings(timings, name, start_time):
 def verify_compatibility():
     tests_dir = pathlib.Path('./dataset/tests')
     if not tests_dir.is_dir():
-        print('!! Tests directory does not exist, compatibility testing was not performed')
+        print('! Tests directory does not exist, compatibility testing was not performed')
         return
 
     f = 'NONE'
@@ -110,9 +120,10 @@ def verify_compatibility():
             ac.convert_to_wave(ac.convert_from_wave(ac.load_audio(tests_dir / f)))
     except:
         print(f'Compatibility check FAILED on file {f}')
-        print('Please ensure that ffmpeg (and maybe sox) are installed - '
-              'these are necessary to read audio files')
+        print('Please ensure that ffmpeg (and maybe sox) are installed - these are necessary for reading audio files.')
+        print('No training can be done if audio files can not be read.')
         exit(1)
+    print('Compatibility verified.')
 
 
 def get_dataset_paths():
@@ -124,7 +135,7 @@ def get_dataset_paths():
     return dfiles
 
 
-def load_progress():
+def load_progress(is_baby=False):
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
     if len(os.listdir(p_snapshots)) == 0:
@@ -150,7 +161,12 @@ def load_progress():
         model = EchoMorph(training_parameters).to(device=device, dtype=precision)
         model.load_state_dict(torch.load(directory / 'model.bin'))
 
-        consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
+        try:
+            consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
+        except:
+            print('! Consume file not found! Starting consuming from scratch!')
+            dpaths = get_dataset_paths()
+            consume = ConsumeProgress([[x, ac.total_frames(x)] for x in dpaths])
         print('  Fetching extra info... ', end='')
 
         new_dpaths = [x for x in get_dataset_paths() if x not in consume.paths]
@@ -274,8 +290,9 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler,
         optimizer.zero_grad()
         pred = model(target_sample, history, fragments)
         loss = loss_function(pred, fragments)
+        if loss.isnan():
+            return None
         loss.backward()
-        # TODO: repeating blocks will have way bigger effective learning rate
         optimizer.step()
         total_loss += loss.item()
     mean_loss = total_loss / len(dataloader)
@@ -288,13 +305,15 @@ def training():
     print('Training initiated!')
 
     verify_compatibility()
-    print('Compatibility verified.')
 
     model, consume = load_progress()
     last_save = time.time()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, eps=10e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.75)
+    optimizer = torch.optim.Adam([
+        {'params': model.get_base_parameters(), 'lr': learning_rate},
+        {'params': model.get_multiplicating_parameters(), 'lr': learning_rate / 2.5}
+    ], eps=10e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.7, patience=7)
     timings = {}
     while True:
         bt = time.time()
@@ -305,6 +324,9 @@ def training():
 
         avg_loss = train_on_bite(model, optimizer, scheduler, train_spect, timings)
         report(optimizer, consume, avg_loss, origin)
+        if avg_loss is None:
+            print('!!! BUSTED! Gradient exploded! This is super bad!')
+            break
         if last_save < time.time() - last_save:
             last_save = time.time()
             save_progress(model, consume)

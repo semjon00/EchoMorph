@@ -1,3 +1,4 @@
+from itertools import chain
 import numpy as np
 import torch
 from torch import Tensor, nn
@@ -196,3 +197,14 @@ class EchoMorph(nn.Module):
         intermediate = self.rando_mask(self.audio_encoder(source_fragment, source_history))
         output = self.audio_decoder(intermediate, speaker_characteristic, target_history)
         return output
+
+    def get_multiplicating_parameters(self):
+        return chain.from_iterable([
+            m.blocks_mid.parameters() for m in [self.speaker_encoder, self.audio_encoder, self.audio_decoder]
+        ])
+
+    def get_base_parameters(self):
+        mult_params = set(self.get_multiplicating_parameters())
+        all_params = set(self.parameters())
+        base_params = list(all_params - mult_params)
+        return base_params
