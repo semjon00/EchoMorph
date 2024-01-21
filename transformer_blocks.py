@@ -117,11 +117,10 @@ class TransformerBlock(nn.Module):
         self.self_attn_dropout = nn.Dropout(p=drop)
         self.self_attn_norm = nn.LayerNorm(embed_dim)
 
-        self.cross_attn_blocks = []
-        for _ in range(n_cross_attn_blocks):
-            self.cross_attn_blocks.append(
-                CrossAttention(embed_dim, num_heads, attn_drop)
-            )
+        self.cross_attn_blocks = nn.ModuleList([
+            CrossAttention(embed_dim, num_heads, attn_drop)
+            for _ in range(n_cross_attn_blocks)
+        ])
 
         self.ffn = FeedForward(embed_dim, hidden_dim)
         self.ffn_dropout = nn.Dropout(p=drop)
