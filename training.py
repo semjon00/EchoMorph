@@ -18,9 +18,9 @@ precision = torch.float32 if device == "cpu" else torch.float16
 print(f"Using {device} device with {precision} precision")
 ac = AudioConventer(device, precision)
 
-batch_size = 128  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
+batch_size = 32  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
 # TODO: Adjust learning rate
-learning_rate = 0.00017  # Universal
+learning_rate = 0.0002  # Universal
 save_time = 60 * 60
 
 
@@ -80,11 +80,16 @@ class ConsumeProgress:
         self.consumed_duration += end - start
         return self.paths[idx], start, end
 
+    def forget(self):
+        self.consumed_duration = 0
+        self.consumed = [0 for _ in range(len(self.consumed))]
 
-def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
+
+def report(optimizer, consume, avg_loss, avg_loss_origin: pathlib.Path):
     percent_consumed = 100 * consume.consumed_prop()
+    current_lr = optimizer.param_groups[0]['lr']
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
-    print(f'Report | {percent_consumed:2.3f}% | {avg_loss:3.5f} loss on "{fn_string}"')
+    print(f'Report | {percent_consumed:2.3f}% | lr {1e6*current_lr:3.2f}q | {avg_loss:3.5f} loss on "{fn_string}"')
 
 
 def upd_timings(timings, name, start_time):
@@ -251,7 +256,7 @@ def loss_function(pred, truth):
     return loss
 
 
-def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
+def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler, train_spect: Tensor, timings):
     tsl = model.pars.target_sample_len
     target_sample = train_spect[0:tsl, :]
 
@@ -273,8 +278,10 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
         # TODO: repeating blocks will have way bigger effective learning rate
         optimizer.step()
         total_loss += loss.item()
+    mean_loss = total_loss / len(dataloader)
+    scheduler.step(mean_loss)
     upd_timings(timings, 'training', bt)
-    return total_loss / len(dataloader)
+    return mean_loss
 
 
 def training():
@@ -287,6 +294,7 @@ def training():
     last_save = time.time()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, eps=10e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.75)
     timings = {}
     while True:
         bt = time.time()
@@ -295,12 +303,13 @@ def training():
         if origin is None:
             break
 
-        avg_loss = train_on_bite(model, optimizer, train_spect, timings)
-        report(model, consume, avg_loss, origin)
+        avg_loss = train_on_bite(model, optimizer, scheduler, train_spect, timings)
+        report(optimizer, consume, avg_loss, origin)
         if last_save < time.time() - last_save:
             last_save = time.time()
             save_progress(model, consume)
             print(f'Timings: {timings}')
+    print(f'Timings: {timings}')
     save_progress(model, consume)
     print('Training finished!')
 
