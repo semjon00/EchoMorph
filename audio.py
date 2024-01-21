@@ -5,12 +5,12 @@ import torchaudio.transforms as transforms
 AUDIO_FORMATS = ['aac', 'mp3', 'flac', 'wav']
 
 class AudioConventer:
-    def __init__(self, device, dtype=torch.float32, sample_rate=32000, width=512, stretch=5):
+    def __init__(self, device, precision=torch.float32, sample_rate=32000, width=512, stretch=5):
         self.sample_rate = sample_rate
         self.n_fft = width - 2
         self.hop_length = self.n_fft // stretch
         self.device = device
-        self.dtype = dtype
+        self.dtype = precision
         
         self.transform_to = transforms.Spectrogram(
             n_fft=self.n_fft, hop_length=self.hop_length, power=None

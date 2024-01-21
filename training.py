@@ -14,15 +14,17 @@ import einops
 from model import EchoMorph, EchoMorphParameters
 from audio import AudioConventer, AUDIO_FORMATS
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using {device} device")
-ac = AudioConventer(device)
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+precision = torch.float32 if device == "cpu" else torch.float16
+print(f"Using {device} device with {precision} precision")
+ac = AudioConventer(device, precision)
 
 batch_size = 128  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
 # TODO: Adjust learning rate
 learning_rate = 0.00017  # Universal
 save_time = 60 * 60
 epoch_number = 0  # Increase if you want to train on the same dataset again
+
 
 def print(*args, **kwargs):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
@@ -33,7 +35,7 @@ def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
     tot_consume = sum([el[2] for el in consume])
     percent_consumed = 100 * sum_consume / tot_consume
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
-    print(f'Report | {percent_consumed:2.3f}% | {avg_loss:3.3f} loss on {fn_string}')
+    print(f'Report | {percent_consumed:2.3f}% | {avg_loss:3.5f} loss on "{fn_string}"')
 
 
 def upd_timings(timings, name, start_time):
@@ -67,6 +69,7 @@ def get_dataset_files():
               and x.parts[1] not in ['tests', 'disabled']]
     return dfiles
 
+
 def load_progress():
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
@@ -74,7 +77,7 @@ def load_progress():
         # Initialize new model and fresh dataset consuming progress
         print('  Initializing a new EchoMorph model...')
         pars = EchoMorphParameters()
-        model = EchoMorph(pars).to(device)
+        model = EchoMorph(pars).to(device=device, dtype=precision)
 
         print('  Fetching dataset info... ', end='')
         dfiles = get_dataset_files()
@@ -89,7 +92,7 @@ def load_progress():
         directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
         print(f'  Loading an EchoMorph model stored in {directory}...')
         training_parameters = EchoMorphParameters()
-        model = EchoMorph(training_parameters).to(device)
+        model = EchoMorph(training_parameters).to(device=device, dtype=precision)
         model.load_state_dict(torch.load(directory / 'model.bin'))
 
         consume = pickle.load(open(directory / 'consume.bin', 'rb'))
@@ -142,6 +145,7 @@ def take_a_bite(consume):
     consume[sel][1] += load_now
     sg = ac.convert_from_wave(loaded)
     return sg, consume[sel]
+
 
 class CustomAudioDataset(Dataset):
     def __init__(self, train_spect, hl, fl):
