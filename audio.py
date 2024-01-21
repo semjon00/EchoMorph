@@ -4,22 +4,18 @@ import torchaudio.transforms as transforms
 
 AUDIO_FORMATS = ['aac', 'mp3', 'flac', 'wav']
 
+
 class AudioConventer:
-    def __init__(self, device, precision=torch.float32, sample_rate=32000, width=512, stretch=5):
+    def __init__(self, target_device, precision=torch.float32, sample_rate=32000, width=512, stretch=5):
         self.sample_rate = sample_rate
         self.n_fft = width - 2
         self.hop_length = self.n_fft // stretch
-        self.device = device
-        self.dtype = precision
-        
-        self.transform_to = transforms.Spectrogram(
-            n_fft=self.n_fft, hop_length=self.hop_length, power=None
-        ).to(self.device)
-
-        self.transform_from = transforms.InverseSpectrogram(
-            n_fft=self.n_fft, hop_length=self.hop_length
-        ).to(self.device)
-        
+        # For some reason, resampling on GPU is unbeliveably slow,
+        # therefore we actually perform the computations on the CPU and send the result to the needed device.
+        self.target_device = target_device
+        self.target_dtype = precision
+        self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None).to(target_device)
+        self.transform_from = transforms.InverseSpectrogram(n_fft=self.n_fft, hop_length=self.hop_length).to(target_device)
         self.log10 = torch.log(torch.tensor(10))
 
     def total_frames(self, path):
@@ -33,24 +29,17 @@ class AudioConventer:
             del kwargs['degrade_keep']
 
         wv, sr = torchaudio.load(*args, **kwargs)
-        wv = wv.to(self.device, self.dtype).mean(dim=0)  # To correct device, type, and to mono
+        wv = wv.mean(dim=0)  # To correct device, type, and to mono
         if degrade_keep is not None and degrade_keep < 1.0:
-            im_sample_frequency = round(self.sample_rate * degrade_keep)
-
-            r = transforms.Resample(
-                sr, im_sample_frequency, dtype=self.dtype
-            ).to(self.device)(wv)
-
-            r = transforms.Resample(
-                im_sample_frequency, self.sample_rate, dtype=self.dtype
-            ).to(self.device)(r)
+            # Re-sampling frequencies with a small gcd is a pain. 300 is a divider of both 44100 and 48000.
+            im_sample_frequency = round(self.sample_rate * degrade_keep) // 300 * 300
+            wv = transforms.Resample(sr, im_sample_frequency)(wv)
+            wv = transforms.Resample(im_sample_frequency, self.sample_rate)(wv)
         else:
-            r = transforms.Resample(
-                sr, self.sample_rate, dtype=self.dtype
-            ).to(self.device)(wv)
-        
-        r = r / max(r.max(), -r.min())
-        return r
+            wv = transforms.Resample(sr, self.sample_rate)(wv)
+
+        wv = wv / max(wv.max(), -wv.min())
+        return wv.to(self.target_device, self.target_dtype)
 
     def convert_from_wave(self, wv):
         """
@@ -62,7 +51,7 @@ class AudioConventer:
         logamp = torch.clamp(torch.abs(sg), min=1e-10, max=1e2).log10()
         logamp = (logamp + 10) / 12
         phase = torch.angle(sg) / torch.pi
-        sg = torch.cat([logamp, phase], dim=1).to(self.device, self.dtype)
+        sg = torch.cat([logamp, phase], dim=1).to(self.target_device, self.target_dtype)
         return sg
 
     def convert_to_wave(self, x):
@@ -85,6 +74,7 @@ class AudioConventer:
 
     def x_width(self):
         return (self.n_fft // 2 + 1) * 2
+
 
 if __name__ == '__main__':
     print('Audio conversion test.')
