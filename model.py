@@ -15,7 +15,7 @@ from transformer_blocks import PositionalEmbedding, TransformerBlock
 
 class EchoMorphParameters:
     """Training parameters"""
-    def __init__(self):
+    def __init__(self, **kwargs):
         one_sec_len = (32000 // 105) // 32 * 32  # sample_rate / hop_length; approximately
 
         self.target_sample_len = 8 * one_sec_len
@@ -45,6 +45,9 @@ class EchoMorphParameters:
         self.rm_k_min = 0
         self.rm_k_max = 3 / 4
         self.rm_fun = 'exp'
+
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 class AudioCoder(nn.Module):

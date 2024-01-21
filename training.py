@@ -3,7 +3,6 @@ import datetime
 import os
 import pathlib
 import time
-
 import torch
 import random
 import pickle
@@ -23,17 +22,67 @@ batch_size = 128  # Applies to AudioEncoder and AudioDecoder, does not apply to 
 # TODO: Adjust learning rate
 learning_rate = 0.00017  # Universal
 save_time = 60 * 60
-epoch_number = 0  # Increase if you want to train on the same dataset again
 
 
 def print(*args, **kwargs):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
 
 
+class ConsumeProgress:
+    def __init__(self, names_and_durations, starting_epoch=0):
+        self.starting_epoch = starting_epoch
+        self.paths, self.consumed, self.durations = [], [], []
+
+        self.consumed_duration = 0
+        self.total_duration = 0
+        self.add_files(names_and_durations)
+
+    def consumed_prop(self):
+        return self.consumed_duration / self.total_duration
+
+    def add_files(self, names_and_durations):
+        self.paths += [x[0] for x in names_and_durations]
+
+        new_durations = [x[1] for x in names_and_durations]
+        self.durations.extend(new_durations)
+        self.total_duration += sum(new_durations)
+
+        new_consumed = [13 * self.starting_epoch for _ in range(len(names_and_durations))]
+        self.consumed.extend(new_consumed)
+        self.consumed_duration = sum(new_consumed)
+
+    def lottery_idx(self):
+        if self.consumed_duration == self.total_duration:
+            return None
+
+        tot_rem = self.total_duration - self.consumed_duration
+        drop = random.randint(0, tot_rem - 1)
+        sel = None
+        for i in range(len(self.paths)):
+            rem = self.durations[i] - self.consumed[i]
+            if drop < rem:
+                sel = i
+                break
+            drop -= rem
+        return sel
+
+    def bite(self, idx, max_duration):
+        start = self.consumed[idx]
+        rem = (self.durations[idx] - start) / max_duration
+        if rem > 4:
+            end = start + max_duration
+        elif rem < 1:
+            end = self.durations[idx]
+        else:
+            times = int(rem + 1)  # How many bites left to do, does ceiling(rem)
+            end = start + (self.durations[idx] - start) // times
+        self.consumed[idx] = end
+        self.consumed_duration += end - start
+        return self.paths[idx], start, end
+
+
 def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
-    sum_consume = sum([el[1] for el in consume])
-    tot_consume = sum([el[2] for el in consume])
-    percent_consumed = 100 * sum_consume / tot_consume
+    percent_consumed = 100 * consume.consumed_prop()
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
     print(f'Report | {percent_consumed:2.3f}% | {avg_loss:3.5f} loss on "{fn_string}"')
 
@@ -61,7 +110,7 @@ def verify_compatibility():
         exit(1)
 
 
-def get_dataset_files():
+def get_dataset_paths():
     dfiles = list(pathlib.Path("./dataset").rglob("*.*"))
     allowed_extensions = [f'.{x}' for x in AUDIO_FORMATS]
     dfiles = [x for x in dfiles
@@ -80,9 +129,10 @@ def load_progress():
         model = EchoMorph(pars).to(device=device, dtype=precision)
 
         print('  Fetching dataset info... ', end='')
-        dfiles = get_dataset_files()
-        print(f'for {len(dfiles)} new files...')
-        consume = [[x, epoch_number * 7, ac.total_frames(x)] for x in dfiles]
+        dpaths = get_dataset_paths()
+        print(f'for {len(dpaths)} new files...')
+
+        consume = ConsumeProgress([[x, ac.total_frames(x)] for x in dpaths])
 
         print('  Saving zero progress...')
         save_progress(model, consume)
@@ -95,13 +145,13 @@ def load_progress():
         model = EchoMorph(training_parameters).to(device=device, dtype=precision)
         model.load_state_dict(torch.load(directory / 'model.bin'))
 
-        consume = pickle.load(open(directory / 'consume.bin', 'rb'))
+        consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
         print('  Fetching extra info... ', end='')
-        new_dfiles = [x for x in get_dataset_files() if x not in [y[0] for y in consume]]
-        if len(new_dfiles) > 0:
-            print(f'for {len(new_dfiles)} new files...')
-            new_dfiles = [[x, 0, ac.total_frames(x)] for x in new_dfiles]
-            consume.extend(new_dfiles)
+
+        new_dpaths = [x for x in get_dataset_paths() if x not in consume.paths]
+        if len(new_dpaths) > 0:
+            print(f'for {len(new_dpaths)} new files...')
+            consume.add_files([[x, ac.total_frames(x)] for x in new_dpaths])
         else:
             print('')
         print('Loading progress done!')
@@ -123,28 +173,19 @@ def random_degradation_value():
     return min((r ** 1.5) + 0.2, 1.000001)
 
 
-def take_a_bite(consume):
-    """Randomly selects a file from dataset and takes a bite.
-    This thing is slow, but it gets the job done"""
-    load_opt = 45678 * 300  # About 5 minutes, don't care about the bitrate and the exact value
-
-    tot_rem = sum([el[2] - el[1] for el in consume])
-    if tot_rem == 0:
+def take_a_bite(consume: ConsumeProgress):
+    """Randomly selects a file from dataset and takes a bite."""
+    sel = consume.lottery_idx()
+    if sel is None:
         return None, None
 
-    drop = random.randint(0, tot_rem - 1)
-    sel = 0
-    for i, el in enumerate(consume):
-        if drop < el[2] - el[1]:
-            sel = i
-            break
-        drop -= el[2] - el[1]
-    load_now = load_opt if consume[sel][2] - consume[sel][1] > 2 * load_opt else consume[sel][2]
-    loaded = ac.load_audio(consume[sel][0], frame_offset=consume[sel][1], num_frames=load_now,
+    # About 5 minutes, don't care about the bitrate and the exact value
+    cap = 45678 * 300
+    path, start, end = consume.bite(sel, cap)
+    loaded = ac.load_audio(path, frame_offset=start, num_frames=end - start,
                            degrade_keep=random_degradation_value())
-    consume[sel][1] += load_now
     sg = ac.convert_from_wave(loaded)
-    return sg, consume[sel]
+    return sg, path
 
 
 class CustomAudioDataset(Dataset):
@@ -221,7 +262,6 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
                                       batch_size=batch_size, shuffle=True)
     upd_timings(timings, 'dataloading', bt)
 
-    # TODO: add training in .half() mode
     bt = time.time()
     total_loss = 0
     model.train()
@@ -246,7 +286,7 @@ def training():
     model, consume = load_progress()
     last_save = time.time()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, eps=10e-4)
     timings = {}
     while True:
         bt = time.time()
@@ -256,7 +296,7 @@ def training():
             break
 
         avg_loss = train_on_bite(model, optimizer, train_spect, timings)
-        report(model, consume, avg_loss, origin[0])
+        report(model, consume, avg_loss, origin)
         if last_save < time.time() - last_save:
             last_save = time.time()
             save_progress(model, consume)
