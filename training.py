@@ -29,8 +29,8 @@ def print(*args, **kwargs):
 
 
 def report(model, consume, avg_loss, avg_loss_origin: pathlib.Path):
-    sum_consume = consume([el[1] for el in consume])
-    tot_consume = consume([el[2] for el in consume])
+    sum_consume = sum([el[1] for el in consume])
+    tot_consume = sum([el[2] for el in consume])
     percent_consumed = 100 * sum_consume / tot_consume
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
     print(f'Report | {percent_consumed:2.3f}% | {avg_loss:3.3f} loss on {fn_string}')
@@ -43,9 +43,13 @@ def upd_timings(timings, name, start_time):
 
 
 def verify_compatibility():
+    tests_dir = pathlib.Path('./dataset/tests')
+    if not tests_dir.is_dir():
+        print('!! Tests directory does not exist, compatibility testing was not performed')
+        return
+
     f = 'NONE'
     try:
-        tests_dir = pathlib.Path('./dataset/tests')
         for f in os.listdir(tests_dir):
             ac.convert_to_wave(ac.convert_from_wave(ac.load_audio(tests_dir / f)))
     except:
@@ -85,7 +89,7 @@ def load_progress():
         directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
         print(f'  Loading an EchoMorph model stored in {directory}...')
         training_parameters = EchoMorphParameters()
-        model = EchoMorph(training_parameters)
+        model = EchoMorph(training_parameters).to(device)
         model.load_state_dict(torch.load(directory / 'model.bin'))
 
         consume = pickle.load(open(directory / 'consume.bin', 'rb'))
@@ -103,7 +107,7 @@ def load_progress():
 
 def save_progress(model, consume):
     p_snapshots = pathlib.Path("snapshots")
-    directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat().strip(':').strip('-')
+    directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat().replace(':', '.')
     os.makedirs(directory, exist_ok=True)
     torch.save(model.state_dict(), directory / 'model.bin')
     pickle.dump(consume, open(directory / 'consume.bin', 'wb'))
@@ -159,12 +163,14 @@ class CustomAudioDataset(Dataset):
 
 
 loss_function_freq_significance_cache = None
-def loss_function_freq_significance(width):
+def loss_function_freq_significance(width, device):
     global loss_function_freq_significance_cache
     if loss_function_freq_significance_cache is None or loss_function_freq_significance_cache[0] != width:
-        vals = torch.arange(start=2.0, end=0, step=-2.0 / width).exp()
+        vals = torch.arange(start=2.0, end=0, step=-2.0 / width, device=device).exp()
         vals = vals / torch.sum(vals) * width
         loss_function_freq_significance_cache = width, vals
+    if loss_function_freq_significance_cache[1].device != device:
+        loss_function_freq_significance_cache = width, loss_function_freq_significance_cache[1].to(device)
     return loss_function_freq_significance_cache[1]
 
 
@@ -185,13 +191,13 @@ def loss_function(pred, truth):
     amp_distance = torch.max(torch.clamp(amp_distance, max=0.25), 3.0 * (-amp_distance)) * 12
     # Frequency ranges are not created equal
     amp_distance = torch.clamp(amp_distance, max=10)
-    amp_distance *= loss_function_freq_significance(width)
+    amp_distance *= loss_function_freq_significance(width, amp_distance.device)
 
     # Phase part of the spectrogram works like a circle.
     phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
     # Clamp to [0;1], where 1 is the opposite phase
     phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
-    phase_distance *= loss_function_freq_significance(width)
+    phase_distance *= loss_function_freq_significance(width, amp_distance.device)
     # Correct phase is not as important as correct amplitude
 
     # We want to minimize distance squared.
