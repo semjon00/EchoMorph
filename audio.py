@@ -55,7 +55,7 @@ class AudioConventer:
         return sg
 
     def convert_to_wave(self, x):
-        """Reverses convert_from_wave"""
+        """Reverses convert_from_wave, output precision is float32"""
         split_size = x.size(1) // 2
         magnitude = x[..., :split_size] * 12 - 10
         magnitude = torch.clamp((magnitude * self.log10).exp(), max=100.0)
@@ -63,14 +63,14 @@ class AudioConventer:
 
         real_part = magnitude * torch.cos(phase)
         imag_part = magnitude * torch.sin(phase)
-        sg = torch.complex(real_part, imag_part).T
+        sg = torch.complex(real_part.to(torch.float32), imag_part.to(torch.float32)).T
         wv = self.transform_from(sg)
         wv /= max(wv.max(), -wv.min())
         wv *= 0.5
         return wv
 
     def save_audio(self, wv, path):
-        torchaudio.save(path, wv.unsqueeze(0), self.sample_rate)
+        torchaudio.save(path, wv.unsqueeze(0).to('cpu'), self.sample_rate)
 
     def x_width(self):
         return (self.n_fft // 2 + 1) * 2

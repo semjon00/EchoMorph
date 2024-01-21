@@ -27,9 +27,9 @@ def crop_from_middle(x, length):
 
 class InferenceFreestyle:
     def __init__(self):
-        # TODO: half mode
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.ac = AudioConventer(device)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.precision = torch.float32 if self.device == "cpu" else torch.float16
+        self.ac = AudioConventer(self.device, self.precision)
 
         root_snapshots = pathlib.Path("snapshots")
         if not root_snapshots.is_dir() or len(os.listdir(root_snapshots)) == 0:
@@ -40,7 +40,7 @@ class InferenceFreestyle:
         directory = root_snapshots / sorted(os.listdir(root_snapshots))[-1]
         print(f'Loading an EchoMorph model stored in {directory}... ', end='')
         training_parameters = EchoMorphParameters()
-        self.model = EchoMorph(training_parameters)
+        self.model = EchoMorph(training_parameters).to(device=self.device, dtype=self.precision)
         self.model.load_state_dict(torch.load(directory / 'model.bin'))
         self.model.eval()
         print('Done!')
@@ -133,11 +133,11 @@ class InferenceFreestyle:
 
         hl = self.model.pars.history_len
         fl = self.model.pars.fragment_len
-        source = torch.cat((torch.zeros([hl, source.size(1)]), source, torch.zeros([fl, source.size(1)])), dim=0)
+        source = torch.nn.functional.pad(source, (0, 0, hl, fl))
         target = torch.zeros_like(source)
         with torch.no_grad():
             print('Inferencing: [', end='')
-            for cur in range(hl, target.size(0), fl):
+            for cur in range(hl, target.size(0) - fl, fl):
                 if do_lerp:
                     lerp_c = (cur - hl) / (target.size(0) - hl)
                     cur_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
@@ -201,9 +201,9 @@ if __name__ == '__main__':
                     s = freestyle.load('./dataset/tests/example1.mp3')
                     freestyle.play_sample(s)
                 case 'load':
-                    freestyle.load(cmd[1])
+                    freestyle.load(' '.join(cmd[1:]))
                 case 'save':
-                    freestyle.save(cmd[1], cmd[2])
+                    freestyle.save(cmd[1], ' '.join(cmd[2:]))
                 case 'derive':
                     freestyle.derive_sc(cmd[1])
                 case 'merge':
