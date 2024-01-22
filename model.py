@@ -7,7 +7,7 @@ import random
 import pickle
 import os
 
-from transformer_blocks import PositionalEmbedding, TransformerBlock
+from transformer_blocks import PositionalEmbedding, TransformerBlock, FeedForward
 
 # TODO: We have a bottleneck in the middle of the model
 #       SpeakerEncoder also reduces input size 4-fold
@@ -52,8 +52,7 @@ class EchoMorphParameters:
 
 
 class AudioCoder(nn.Module):
-    def __init__(self, spect_width, hidden_dim_m, heads, spect_len, drop, blocks_num, cross_n, mid_repeat_interval,
-                 do_last_layers_norm=True):
+    def __init__(self, spect_width, hidden_dim_m, heads, spect_len, drop, blocks_num, cross_n, mid_repeat_interval):
         super().__init__()
         assert all([x % 2 == 0 for x in blocks_num]), "Criss-crossing won't work"
 
@@ -61,15 +60,13 @@ class AudioCoder(nn.Module):
         for i in range(sum(blocks_num)):
             ed = spect_width if i % 2 == 0 else spect_len
             this_cross_n = cross_n if i % 2 == 0 else 0
-            dn = do_last_layers_norm or i < sum(blocks_num) - 2
             blocks += [TransformerBlock(
                 embed_dim=ed,
                 num_heads=heads,
                 hidden_dim=ed * hidden_dim_m,
                 attn_drop=drop,
                 drop=drop,
-                n_cross_attn_blocks=this_cross_n,
-                do_norm=dn
+                n_cross_attn_blocks=this_cross_n
             )]
         self.blocks_pre = nn.ModuleList(blocks[:blocks_num[0]])
         self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[0]+blocks_num[1]])
@@ -130,14 +127,14 @@ class AudioEncoder(AudioCoder):
 
 class AudioDecoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
-        # If we expect the last block to output a spectrogram,
-        # it is not a sensible thing to do to add normalization layers to it.
-        # Also one block before it, just in case.
         super().__init__(pars.spect_width, pars.ad_hidden_dim_m, pars.ad_heads, pars.fragment_len,
-                         pars.drop, pars.ad_blocks, 2, pars.mid_repeat_interval, do_last_layers_norm=False)
+                         pars.drop, pars.ad_blocks, 2, pars.mid_repeat_interval)
+        self.finish = nn.ModuleList([FeedForward(pars.spect_width, pars.spect_width) for _ in range(2)])
 
     def forward(self, x: Tensor, speaker_characteristic: Tensor, history: Tensor) -> Tensor:
         x = super().forward(x, [speaker_characteristic, history])
+        for layer in self.finish:
+            x = layer(x)
         return x
 
 
