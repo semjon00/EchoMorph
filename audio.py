@@ -1,21 +1,21 @@
+import numpy
 import torch
 import torchaudio
-import torchaudio.transforms as transforms
+import torchaudio.transforms as T
 
 AUDIO_FORMATS = ['aac', 'mp3', 'flac', 'wav']
 
 
 class AudioConventer:
-    def __init__(self, target_device, precision=torch.float32, sample_rate=32000, width=512, stretch=5):
+    def __init__(self, target_device, precision=torch.float32, sample_rate=32000, width=80, stretch=2):
         self.sample_rate = sample_rate
-        self.n_fft = width - 2
+        self.n_fft = width
         self.hop_length = self.n_fft // stretch
         # For some reason, resampling on GPU is unbeliveably slow,
         # therefore we actually perform the computations on the CPU and send the result to the needed device.
         self.target_device = target_device
         self.target_dtype = precision
-        self.transform_to = transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=None).to(target_device)
-        self.transform_from = transforms.InverseSpectrogram(n_fft=self.n_fft, hop_length=self.hop_length).to(target_device)
+        self.mel_transform = T.MelSpectrogram(sample_rate=self.sample_rate, n_fft=4096, n_mels=width, hop_length=self.hop_length)
         self.log10 = torch.log(torch.tensor(10))
 
     def total_frames(self, path):
@@ -33,52 +33,42 @@ class AudioConventer:
         if degrade_keep is not None and degrade_keep < 1.0:
             # Re-sampling frequencies with a small gcd is a pain. 300 is a divider of both 44100 and 48000.
             im_sample_frequency = round(self.sample_rate * degrade_keep) // 300 * 300
-            wv = transforms.Resample(sr, im_sample_frequency)(wv)
-            wv = transforms.Resample(im_sample_frequency, self.sample_rate)(wv)
+            wv = T.Resample(sr, im_sample_frequency)(wv)
+            wv = T.Resample(im_sample_frequency, self.sample_rate)(wv)
         else:
-            wv = transforms.Resample(sr, self.sample_rate)(wv)
+            wv = T.Resample(sr, self.sample_rate)(wv)
 
         wv = wv / max(wv.max(), -wv.min())
-        return wv.to(self.target_device, self.target_dtype)
+        return wv
 
     def convert_from_wave(self, wv):
-        """
-        Obtains the spectrogram of the provided waveform.
-        Then, re-encodes the spectrogram as a stack
-        of normalized log-amplitudes and phases in interval (from -1 to +1).
-        """
-        sg = self.transform_to(wv).T
-        logamp = torch.clamp(torch.abs(sg), min=1e-10, max=1e2).log10()
-        logamp = (logamp + 10) / 12
-        phase = torch.angle(sg) / torch.pi
-        sg = torch.cat([logamp, phase], dim=1).to(self.target_device, self.target_dtype)
-        return sg
+        import torchaudio.transforms as T
+        # v = T.GriffinLim(n_fft=2048)(T.Spectrogram(n_fft=2048, power=2)(wv))
+        mel_spec = self.mel_transform(wv)
+        logmel = numpy.log10(numpy.clip(mel_spec, a_min=1.01e-10, a_max=1e2))
+        logmel = (logmel + 10) / 12
+        return torch.Tensor(logmel).to(self.target_device, self.target_dtype)
 
     def convert_to_wave(self, x):
         """Reverses convert_from_wave, output precision is float32"""
-        split_size = x.size(1) // 2
-        magnitude = x[..., :split_size] * 12 - 10
-        magnitude = torch.clamp((magnitude * self.log10).exp(), max=100.0)
-        phase = x[..., split_size:] * torch.pi
+        x = x * 12 - 10
+        sg = torch.clamp((x * self.log10).exp(), max=100.0).cuda()
 
-        real_part = magnitude * torch.cos(phase)
-        imag_part = magnitude * torch.sin(phase)
-        sg = torch.complex(real_part.to(torch.float32), imag_part.to(torch.float32)).T
-        wv = self.transform_from(sg)
-        wv /= max(wv.max(), -wv.min())
-        wv *= 0.5
-        return wv
+        bundle = torchaudio.pipelines.TACOTRON2_WAVERNN_PHONE_LJSPEECH
+        vocoder = bundle.get_vocoder().cpu()
+
+        with torch.inference_mode():
+            wv, lengths = vocoder(sg.unsqueeze(0).float().cpu(), torch.Tensor([sg.size(1)]))
+            wv /= 1.5 * max(wv.max(), -wv.min())
+            return torch.Tensor(wv).squeeze(0).to(self.target_device, self.target_dtype)
 
     def save_audio(self, wv, path):
         torchaudio.save(path, wv.unsqueeze(0).to('cpu'), self.sample_rate)
 
-    def x_width(self):
-        return (self.n_fft // 2 + 1) * 2
-
 
 if __name__ == '__main__':
     print('Audio conversion test.')
-    ac = AudioConventer('cpu')
-    wv = ac.convert_to_wave(ac.convert_from_wave(ac.load_audio('./dataset/tests/example4.mp3', degrade_keep=0.2)))
+    ac = AudioConventer('cuda', torch.float16)
+    wv = ac.convert_to_wave(ac.convert_from_wave(ac.load_audio('./dataset/tests/example4.mp3')))
     ac.save_audio(wv, './dataset/tests/back.wav')
     print('Please test that the audio has no distortions.')

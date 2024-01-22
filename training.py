@@ -240,18 +240,6 @@ class CustomAudioDataset(Dataset):
         return self.history[idx], self.fragments[idx]
 
 
-loss_function_freq_significance_cache = None
-def loss_function_freq_significance(width, device):
-    global loss_function_freq_significance_cache
-    if loss_function_freq_significance_cache is None or loss_function_freq_significance_cache[0] != width:
-        vals = torch.arange(start=2.0, end=0, step=-2.0 / width, device=device).exp()
-        vals = vals / torch.sum(vals) * width
-        loss_function_freq_significance_cache = width, vals
-    if loss_function_freq_significance_cache[1].device != device:
-        loss_function_freq_significance_cache = width, loss_function_freq_significance_cache[1].to(device)
-    return loss_function_freq_significance_cache[1]
-
-
 def trivial_loss_function(pred, truth):
     """Very stupid, but 100% bug-free loss function"""
     return torch.mean((truth - pred) ** 2)
@@ -272,14 +260,11 @@ def loss_function(pred, truth):
     amp_distance = truth[..., :width] - pred[..., :width]
     # Undershoot = bad; overshoot = veeeery baaaad
     amp_distance = torch.max(amp_distance, 2.0 * (-amp_distance)) * 12
-    # Frequency ranges are not created equal
-    amp_distance *= loss_function_freq_significance(width, amp_distance.device)
 
     # Phase part of the spectrogram works like a circle.
     phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
     # Clamp to [0;1], where 1 is the opposite phase
     phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
-    phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 3
     # Correct phase is not as important as correct amplitude
 
     # We want to minimize distance squared.

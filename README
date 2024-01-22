@@ -1,3 +1,6 @@
+# TOMBSTONED BRANCH
+# FAILED MEL EXPERIMENT
+
 EchoMorph v0
 
 Features:
@@ -14,3 +17,8 @@ Dataset (obtained is a way that is absolutely not legally questionable, trust me
 * Audiobooks in English, Estonian, Russian
 * "Synthesized voices" in Japanese
 * Solo music for 5 different musical instruments
+
+Requirements:
+  Python 3.10+
+  Librosa 0.9.2
+  Torchaudio
