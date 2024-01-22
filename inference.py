@@ -2,16 +2,25 @@ import torch
 import os
 import pathlib
 import sys
+import time
 
 from audio import AudioConventer, AUDIO_FORMATS
 from model import load_model
 
 
 def play_audio(filename):
-    # Install alsa-utils / alsa-tools if this does not work
-    import subprocess
     if sys.platform.startswith('linux'):
+        # Install alsa-utils / alsa-tools if this does not work
+        import subprocess
         subprocess.call(['aplay', filename], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    elif sys.platform.startswith('win'):
+        # Install pygame
+        import pygame
+        pygame.mixer.init(frequency=44100)
+        pygame.mixer.music.load(filename)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.01)
     else:
         print('Playback not implemented...')
 
@@ -54,6 +63,12 @@ class InferenceFreestyle:
         return name
 
     def load(self, path):
+        if not pathlib.Path(path).is_file():
+            for cand in ['demo', 'dataset\\tests', 'dataset/tests']:
+                if (pathlib.Path(cand) / path).is_file():
+                    path = pathlib.Path(cand) / path
+                    break
+        path = str(path)
         if path.split('.')[-1] in AUDIO_FORMATS:
             wv = self.ac.load_audio(path)
             sg = self.ac.convert_from_wave(wv)
@@ -79,9 +94,11 @@ class InferenceFreestyle:
 
     def play_sample(self, name):
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".wav") as tmpfile:
-            self.save(name, tmpfile.name)
-            play_audio(tmpfile.name)
+        tmpfile = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmpfile.close()
+        self.save(name, tmpfile.name)
+        play_audio(tmpfile.name)
+        os.remove(tmpfile.name)
 
     def derive_sc(self, name):
         with torch.no_grad():
@@ -180,8 +197,8 @@ def demo(freestyle: InferenceFreestyle):
     sc = freestyle.derive_sc(tgt_s_n)
     src = freestyle.load(src)
     out = freestyle.infer(sc, src)
-    freestyle.save(out, save)
     freestyle.play_sample(out)
+    freestyle.save(out, save)
 
 
 if __name__ == '__main__':
@@ -226,8 +243,8 @@ if __name__ == '__main__':
                 case 'clear':
                     freestyle.clear_bank()
                 case _:
-                    print('Commands: load save derive'
-                          '          merge randomize infer'
+                    print('Commands: load save derive\n'
+                          '          merge randomize infer\n'
                           '          play list clear')
         except KeyError as e:
             print(f'No such object {e.args[0]}')
