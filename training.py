@@ -20,7 +20,7 @@ ac = AudioConventer(device, precision)
 
 batch_size = 24  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
 # TODO: Adjust learning rate
-learning_rate = 0.0003  # Universal
+learning_rate = 0.0002  # Universal
 save_time = 60 * 60
 
 
@@ -29,7 +29,7 @@ def print(*args, **kwargs):
 
 
 class ConsumeProgress:
-    def __init__(self, names_and_durations, total_epochs=3):
+    def __init__(self, names_and_durations, total_epochs=10):
         self.epoch = 0
         self.total_epochs = total_epochs
         self.paths, self.consumed, self.durations = [], [], []
@@ -49,7 +49,7 @@ class ConsumeProgress:
         self.total_durations += sum(new_durations)
 
         # TODO: new files should be added with "epoch 0", not current epoch
-        new_consumed = [13 * self.epoch for _ in range(len(names_and_durations))]
+        new_consumed = [(13 * self.epoch) % 256 for _ in range(len(names_and_durations))]
         self.consumed.extend(new_consumed)
         self.total_consumed = sum(new_consumed)
 
@@ -99,7 +99,7 @@ def report(optimizer, consume, avg_loss, avg_loss_origin: pathlib.Path):
     current_lr = optimizer.param_groups[0]['lr']
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
     avg_loss = "\u221E" if avg_loss is None else f'{avg_loss:03.5f}'
-    print(f'Report | {percent_consumed:02.3f}% | lr {1e6*current_lr:03.2f}q | {avg_loss} loss on "{fn_string}"')
+    print(f'Report | {percent_consumed:02.3f}% | lr {1e6*current_lr:03.3f}q | {avg_loss} loss on "{fn_string}"')
 
 
 def upd_timings(timings, name, start_time):
@@ -240,6 +240,11 @@ def loss_function_freq_significance(width, device):
     return loss_function_freq_significance_cache[1]
 
 
+def trivial_loss_function(pred, truth):
+    """Very stupid, but 100% bug-free loss function"""
+    return torch.mean((truth - pred) ** 2)
+
+
 def loss_function(pred, truth):
     """Custom loss function, for comparing two spectrograms. Not the best one, but it should work."""
     # TODO: this can be infinitely improved:
@@ -247,23 +252,22 @@ def loss_function(pred, truth):
     #  * auditory masking
     #  * jitter in neighbor values across time-domain
     #  * slightly different pitch is not too bad
+    #  * large undershoot = "masked"
     width = pred.size(-1) // 2
 
     # This amp code is no more sane than the person who wrote it was when they wrote it
     # Pretty much all the things are eye-balled and not rigorously determined
     amp_distance = truth[..., :width] - pred[..., :width]
     # Undershoot = bad; overshoot = veeeery baaaad
-    # Large overshoot = "masked"
-    amp_distance = torch.max(torch.clamp(amp_distance, max=0.25), 3.0 * (-amp_distance)) * 12
+    amp_distance = torch.max(amp_distance, 2.0 * (-amp_distance)) * 12
     # Frequency ranges are not created equal
-    amp_distance = torch.clamp(amp_distance, max=10)
     amp_distance *= loss_function_freq_significance(width, amp_distance.device)
 
     # Phase part of the spectrogram works like a circle.
     phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
     # Clamp to [0;1], where 1 is the opposite phase
     phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
-    phase_distance *= loss_function_freq_significance(width, amp_distance.device)
+    phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 3
     # Correct phase is not as important as correct amplitude
 
     # We want to minimize distance squared.
@@ -289,7 +293,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler,
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
         pred = model(target_sample, history, fragments)
-        loss = loss_function(pred, fragments)
+        loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision)
         if loss.isnan():
             return None
         loss.backward()
@@ -325,9 +329,9 @@ def training():
         avg_loss = train_on_bite(model, optimizer, scheduler, train_spect, timings)
         report(optimizer, consume, avg_loss, origin)
         if avg_loss is None:
-            print('!!! BUSTED! Gradient exploded! This is super bad!')
+            print('!!! BUSTED! Something exploded! This is super bad!')
             break
-        if last_save < time.time() - last_save:
+        if last_save + save_time < time.time():
             last_save = time.time()
             save_progress(model, consume)
             print(f'Timings: {timings}')
