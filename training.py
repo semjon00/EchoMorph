@@ -13,16 +13,19 @@ import einops
 from model import EchoMorph, EchoMorphParameters
 from audio import AudioConventer, AUDIO_FORMATS
 
+import argparse
+parser = argparse.ArgumentParser(description='Training routine')
+parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--learning_rate', type=float, default=1e-4)
+parser.add_argument('--save_time', type=int, default=60 * 60)
+parser.add_argument('--baby_parameters', action='store_const', const=True, default=False)
+parser.add_argument('--fp16', action='store_const', const=True, default=False)
+args = parser.parse_args()
+
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-precision = torch.float32 if device == "cpu" else torch.float16
+precision = torch.float32 if device == "cpu" and not args.fp16 else torch.float16
 print(f"Using {device} device with {precision} precision")
 ac = AudioConventer(device, precision)
-
-batch_size = 24  # Applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
-# TODO: Adjust learning rate
-learning_rate = 0.0002  # Universal
-save_time = 60 * 60
-
 
 def print(*args, **kwargs):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
@@ -135,13 +138,21 @@ def get_dataset_paths():
     return dfiles
 
 
-def load_progress(is_baby=False):
+def load_progress():
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
     if len(os.listdir(p_snapshots)) == 0:
         # Initialize new model and fresh dataset consuming progress
         print('  Initializing a new EchoMorph model...')
-        pars = EchoMorphParameters()
+
+        if args.baby_parameters:
+            overrided_pars = {'se_blocks': 2,
+                              'ae_blocks': (2, 2, 4), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
+                              'ad_blocks': (2, 4, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
+                              'rm_k_min': 0.8, 'rm_k_max': 0.8, 'mid_repeat_interval': (2,4)}
+        else:
+            overrided_pars = {}
+        pars = EchoMorphParameters(**overrided_pars)
         model = EchoMorph(pars).to(device=device, dtype=precision)
 
         print('  Fetching dataset info... ', end='')
@@ -283,8 +294,9 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler,
     hl = model.pars.history_len
     fl = model.pars.fragment_len
     bt = time.time()
+    # batch_size applies to AudioEncoder and AudioDecoder, does not apply to SpeakerEncoder
     dataloader = DataLoader(CustomAudioDataset(train_spect[tsl:, ...], hl=hl, fl=fl),
-                                      batch_size=batch_size, shuffle=True)
+                            batch_size=args.batch_size, shuffle=True)
     upd_timings(timings, 'dataloading', bt)
 
     bt = time.time()
@@ -306,7 +318,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler,
 
 
 def training():
-    print('Training initiated!')
+    print(f'Training initiated! Args: {args}')
 
     verify_compatibility()
 
@@ -314,9 +326,11 @@ def training():
     last_save = time.time()
 
     optimizer = torch.optim.Adam([
-        {'params': model.get_base_parameters(), 'lr': learning_rate},
-        {'params': model.get_multiplicating_parameters(), 'lr': learning_rate / 2.5}
-    ], eps=10e-4)
+        {'params': model.get_base_parameters(),
+         'lr': args.learning_rate},
+        {'params': model.get_multiplicating_parameters(),
+         'lr': (args.learning_rate / (sum(model.pars.mid_repeat_interval) - 1))}
+    ], eps=1e-4 if precision == torch.float16 else 1e-8)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.7, patience=7)
     timings = {}
     while True:
@@ -331,7 +345,7 @@ def training():
         if avg_loss is None:
             print('!!! BUSTED! Something exploded! This is super bad!')
             break
-        if last_save + save_time < time.time():
+        if last_save + args.save_time < time.time():
             last_save = time.time()
             save_progress(model, consume)
             print(f'Timings: {timings}')
@@ -342,3 +356,4 @@ def training():
 
 if __name__ == '__main__':
     training()
+    # Use like: python training.py --save_time=90 --batch_size=16

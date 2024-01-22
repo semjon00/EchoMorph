@@ -1,5 +1,6 @@
 dataset
 dataset_developing
 snapshots
+logs
 **/.idea/**
 __pycache__

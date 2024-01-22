@@ -17,7 +17,7 @@ from transformer_blocks import PositionalEmbedding, TransformerBlock
 class EchoMorphParameters:
     """Training parameters"""
     def __init__(self, **kwargs):
-        one_sec_len = (32000 // 105) // 32 * 32  # sample_rate / hop_length; approximately
+        one_sec_len = round(32000 / 105 / 64) * 64  # sample_rate / hop_length; approximately
 
         self.target_sample_len = 8 * one_sec_len
         self.history_len = one_sec_len
@@ -27,13 +27,9 @@ class EchoMorphParameters:
         self.sc_len = self.target_sample_len // 4  # Speaker characteristic shrink
         self.ir_width = self.spect_width // 4  # Intermediate representation allowance
 
-        self.drop = 0.05
-
         self.se_blocks = 8
         self.se_heads = 8
         self.se_hidden_dim_m = 3
-
-        self.mid_repeat_interval = (2, 6)  # (inclusive, exclusive)
 
         self.ae_blocks = (6, 4, 4)
         self.ae_heads = 8
@@ -43,9 +39,11 @@ class EchoMorphParameters:
         self.ad_heads = 8
         self.ad_hidden_dim_m = 3
 
+        self.drop = 0.001
         self.rm_k_min = 0
         self.rm_k_max = 3 / 4
         self.rm_fun = 'exp'
+        self.mid_repeat_interval = (2, 6)  # (inclusive, exclusive)
 
         for key, value in kwargs.items():
             setattr(self, key, value)
