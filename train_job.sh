@@ -14,8 +14,17 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:tesla:1
 #SBATCH --exclude=falcon2
+#SBATCH -o logs/log.out
 
 module load any/python/3.8.3-conda
 conda activate transformers-course
+#conda install conda-forge::ffmpeg
+#conda install esri::einops
 
 python training.py --save_time=1800 --batch_size=64 --baby_parameters --no_random_degradation
+
+# Reminder:
+#sbatch train_job.sh
+#squeue -u semjon00
+#squeue -j <job number>
+#scancel
