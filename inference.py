@@ -4,7 +4,7 @@ import pathlib
 import sys
 
 from audio import AudioConventer, AUDIO_FORMATS
-from model import EchoMorph, EchoMorphParameters
+from model import load_model
 
 
 def play_audio(filename):
@@ -36,12 +36,9 @@ class InferenceFreestyle:
             print('No model snapshot means no inference is possible.')
             print('Put a snapshot into the snapshots folder.')
             exit(1)
-
         directory = root_snapshots / sorted(os.listdir(root_snapshots))[-1]
         print(f'Loading an EchoMorph model stored in {directory}... ', end='')
-        training_parameters = EchoMorphParameters()
-        self.model = EchoMorph(training_parameters).to(device=self.device, dtype=self.precision)
-        self.model.load_state_dict(torch.load(directory / 'model.bin'))
+        self.model = load_model(directory, self.device, self.precision)
         self.model.eval()
         print('Done!')
 

@@ -4,6 +4,8 @@ import torch
 from torch import Tensor, nn
 import einops
 import random
+import pickle
+import os
 
 from transformer_blocks import PositionalEmbedding, TransformerBlock
 
@@ -206,3 +208,21 @@ class EchoMorph(nn.Module):
         all_params = set(self.parameters())
         base_params = list(all_params - mult_params)
         return base_params
+
+
+def load_model(directory, device, dtype, verbose=False):
+    # TODO: load safer
+    try:
+        pars = pickle.load(open(directory / 'parameters.bin', 'rb'))
+    except:
+        pars = EchoMorphParameters()
+    model = EchoMorph(pars).to(device=device, dtype=dtype)
+    model.load_state_dict(torch.load(directory / 'model.bin'))
+    if verbose:
+        print(f'Model parameters: {dict(model.pars.__dict__.items())}')
+    return model
+
+def save_model(directory, model: EchoMorph):
+    os.makedirs(directory, exist_ok=True)
+    pickle.dump(model.pars, open(directory / 'parameters.bin', 'wb'))
+    torch.save(model.state_dict(), directory / 'model.bin')

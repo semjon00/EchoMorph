@@ -10,7 +10,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import einops
 
-from model import EchoMorph, EchoMorphParameters
+from model import EchoMorph, EchoMorphParameters, save_model, load_model
 from audio import AudioConventer, AUDIO_FORMATS
 
 import argparse
@@ -20,12 +20,15 @@ parser.add_argument('--learning_rate', type=float, default=1e-4)
 parser.add_argument('--save_time', type=int, default=60 * 60)
 parser.add_argument('--baby_parameters', action='store_const', const=True, default=False)
 parser.add_argument('--fp16', action='store_const', const=True, default=False)
+parser.add_argument('--use_dumb_loss_function', action='store_const', const=True, default=False)
+parser.add_argument('--no_random_degradation', action='store_const', const=True, default=False)
 args = parser.parse_args()
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 precision = torch.float32 if device == "cpu" and not args.fp16 else torch.float16
 print(f"Using {device} device with {precision} precision")
 ac = AudioConventer(device, precision)
+
 
 def print(*args, **kwargs):
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
@@ -139,19 +142,19 @@ def get_dataset_paths():
 
 
 def load_progress():
+    if args.baby_parameters:
+        overrided_pars = {'se_blocks': 2,
+                          'ae_blocks': (2, 2, 4), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
+                          'ad_blocks': (2, 4, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
+                          'rm_k_min': 0.8, 'rm_k_max': 0.8, 'mid_repeat_interval': (2, 4)}
+    else:
+        overrided_pars = {}
+
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
     if len(os.listdir(p_snapshots)) == 0:
         # Initialize new model and fresh dataset consuming progress
         print('  Initializing a new EchoMorph model...')
-
-        if args.baby_parameters:
-            overrided_pars = {'se_blocks': 2,
-                              'ae_blocks': (2, 2, 4), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
-                              'ad_blocks': (2, 4, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
-                              'rm_k_min': 0.8, 'rm_k_max': 0.8, 'mid_repeat_interval': (2,4)}
-        else:
-            overrided_pars = {}
         pars = EchoMorphParameters(**overrided_pars)
         model = EchoMorph(pars).to(device=device, dtype=precision)
 
@@ -168,10 +171,7 @@ def load_progress():
     else:
         directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
         print(f'  Loading an EchoMorph model stored in {directory}...')
-        training_parameters = EchoMorphParameters()
-        model = EchoMorph(training_parameters).to(device=device, dtype=precision)
-        model.load_state_dict(torch.load(directory / 'model.bin'))
-
+        model = load_model(directory, device, precision, verbose=True)
         try:
             consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
         except:
@@ -193,13 +193,14 @@ def load_progress():
 def save_progress(model, consume):
     p_snapshots = pathlib.Path("snapshots")
     directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat().replace(':', '.')
-    os.makedirs(directory, exist_ok=True)
-    torch.save(model.state_dict(), directory / 'model.bin')
+    save_model(directory, model)
     pickle.dump(consume, open(directory / 'consume.bin', 'wb'))
     print('Saved progress.')
 
 
 def random_degradation_value():
+    if args.no_random_degradation:
+        return 1.000001
     # Eyeballed
     r = random.random()
     return min((r ** 1.5) + 0.2, 1.000001)
@@ -305,7 +306,8 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler,
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
         pred = model(target_sample, history, fragments)
-        loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision)
+        lf = trivial_loss_function if args.use_dumb_loss_function else loss_function
+        loss: Tensor = lf(pred.float(), fragments.float()).to(dtype=precision)
         if loss.isnan():
             return None
         loss.backward()
