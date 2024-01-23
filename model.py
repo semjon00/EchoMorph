@@ -78,11 +78,12 @@ class AudioCoder(nn.Module):
     def set_mid_repeat_interval(self, new_val):
         self.mid_repeat_interval = (new_val, new_val + 1)
 
-    def forward(self, x: Tensor, cross: list[Tensor]):
+    def forward(self, x: Tensor, cross: list[Tensor], mid_rep=None):
+        if mid_rep is None:
+            mid_rep = random.randint(*self.mid_repeat_interval)
         for i, block in enumerate(self.blocks_pre):
             x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
-        mid_times = random.randint(*self.mid_repeat_interval)
-        for rep in range(mid_times):
+        for rep in range(mid_rep):
             for i, block in enumerate(self.blocks_mid):
                 x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         for i, block in enumerate(self.blocks_post):
@@ -117,10 +118,10 @@ class AudioEncoder(AudioCoder):
         )
         self.out_w = pars.ir_width
 
-    def forward(self, x: Tensor, history: Tensor) -> Tensor:
+    def forward(self, x: Tensor, history: Tensor, mid_rep=None) -> Tensor:
         x = self.pos_embed(x)
         x = self.dropout(x)
-        x = super().forward(x, [history])
+        x = super().forward(x, [history], mid_rep=mid_rep)
         x[..., self.out_w:] = 0
         return x
 
@@ -131,8 +132,8 @@ class AudioDecoder(AudioCoder):
                          pars.drop, pars.ad_blocks, 2, pars.mid_repeat_interval)
         self.finish = nn.ModuleList([FeedForward(pars.spect_width, pars.spect_width) for _ in range(2)])
 
-    def forward(self, x: Tensor, speaker_characteristic: Tensor, history: Tensor) -> Tensor:
-        x = super().forward(x, [speaker_characteristic, history])
+    def forward(self, x: Tensor, speaker_characteristic: Tensor, history: Tensor, mid_rep=None) -> Tensor:
+        x = super().forward(x, [speaker_characteristic, history], mid_rep=mid_rep)
         for layer in self.finish:
             x = layer(x)
         return x
@@ -172,7 +173,8 @@ class RandoMask(nn.Module):
             pels = els ** (pp * (self.k_max - self.k_min) + self.k_min)
         else:
             raise "Wrong randomask fun"
-        x[..., round(pels):, :] = 0
+        pels = round(pels)
+        x[..., pels:, :] = 0  # Masking rightmost columns, leaving pels leftmost columns intact
         return x
 
 
@@ -185,14 +187,14 @@ class EchoMorph(nn.Module):
         self.rando_mask = RandoMask(pars.rm_k_min, pars.rm_k_max, pars.rm_fun)
         self.audio_decoder = AudioDecoder(pars)
 
-    def forward(self, target_sample, source_history, source_fragment, target_history=None):
+    def forward(self, target_sample, source_history, source_fragment, target_history=None, middle_repeats=None):
         """Used for training, use inference.py for inference"""
         if target_history is None:
             target_history = source_history
 
         speaker_characteristic = self.speaker_encoder(target_sample)
-        intermediate = self.rando_mask(self.audio_encoder(source_fragment, source_history))
-        output = self.audio_decoder(intermediate, speaker_characteristic, target_history)
+        intermediate = self.rando_mask(self.audio_encoder(source_fragment, source_history, middle_repeats))
+        output = self.audio_decoder(intermediate, speaker_characteristic, target_history, middle_repeats)
         return output
 
     def get_multiplicating_parameters(self):

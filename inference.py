@@ -21,6 +21,7 @@ def play_audio(filename):
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
             time.sleep(0.01)
+        pygame.mixer.music.unload()
     else:
         print('Playback not implemented...')
 

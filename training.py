@@ -16,7 +16,7 @@ from audio import AudioConventer, AUDIO_FORMATS
 import argparse
 parser = argparse.ArgumentParser(description='Training routine')
 parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--learning_rate', type=float, default=1e-4)
+parser.add_argument('--learning_rate', type=float, default=1e-5)
 parser.add_argument('--save_time', type=int, default=60 * 60)
 parser.add_argument('--baby_parameters', action='store_const', const=True, default=False)
 parser.add_argument('--fp16', action='store_const', const=True, default=False)
@@ -53,12 +53,12 @@ class ConsumeProgress:
 
         new_durations = [x[1] for x in names_and_durations]
         self.durations.extend(new_durations)
-        self.total_durations += sum(new_durations)
+        self.total_durations = sum(self.durations)
 
         # TODO: new files should be added with "epoch 0", not current epoch
         new_consumed = [(13 * self.epoch) % 256 for _ in range(len(names_and_durations))]
         self.consumed.extend(new_consumed)
-        self.total_consumed = sum(new_consumed)
+        self.total_consumed = sum(self.consumed)
 
     def lottery_idx(self):
         if self.total_consumed == self.total_durations:
@@ -124,6 +124,8 @@ def verify_compatibility():
     f = 'NONE'
     try:
         for f in os.listdir(tests_dir):
+            if f.endswith('.gitkeep'):
+                continue
             ac.convert_to_wave(ac.convert_from_wave(ac.load_audio(tests_dir / f)))
     except:
         print(f'Compatibility check FAILED on file {f}')
@@ -133,12 +135,16 @@ def verify_compatibility():
     print('Compatibility verified.')
 
 
-def get_dataset_paths():
-    dfiles = list(pathlib.Path("./dataset").rglob("*.*"))
+def get_dataset_paths(for_eval=False):
+    p = f"./dataset/eval" if for_eval else "./dataset"
+    dfiles = list(pathlib.Path(p).rglob("*.*"))
     allowed_extensions = [f'.{x}' for x in AUDIO_FORMATS]
+    banned_dirs = ['tests', 'disabled']
+    if not for_eval:
+        banned_dirs += ['eval']
     dfiles = [x for x in dfiles
               if any([x.parts[-1].endswith(ext) for ext in allowed_extensions])
-              and x.parts[1] not in ['tests', 'disabled']]
+              and x.parts[1] not in banned_dirs]
     return dfiles
 
 
@@ -153,49 +159,51 @@ def load_progress():
 
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
-    if len(os.listdir(p_snapshots)) == 0:
-        # Initialize new model and fresh dataset consuming progress
-        print('  Initializing a new EchoMorph model...')
+    directory = None
+    try:
+        directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
+    except:
+        pass
+    print(f'  Snapshot directory {directory}')
+
+    if directory:
+        model = load_model(directory, device, precision, verbose=True)
+        print(f'  Loaded an EchoMorph model.')
+    else:
         pars = EchoMorphParameters(**overrided_pars)
         model = EchoMorph(pars).to(device=device, dtype=precision)
+        print('  Initialized a new EchoMorph model...')
 
-        print('  Fetching dataset info... ', end='')
-        dpaths = get_dataset_paths()
-        print(f'for {len(dpaths)} new files...')
+    try:
+        consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
+    except:
+        consume = ConsumeProgress([])
+    print(f'  Consume has {len(consume.paths)} training paths before refresh... ', end='')
+    new_dpaths = [x for x in get_dataset_paths() if x not in consume.paths]
+    consume.add_files([[x, ac.total_frames(x)] for x in new_dpaths])
+    print(f'and {len(consume.paths)} files after refresh... ')
 
-        consume = ConsumeProgress([[x, ac.total_frames(x)] for x in dpaths])
+    try:
+        training_params = pickle.load(open(directory / 'training_params.bin', 'rb'))
+        print('  Loaded training params.')
+    except:
+        training_params = [1.0]
+        print('  Initialized training params.')
+    training_params[0] = min(args.learning_rate, training_params[0])
 
-        print('  Saving zero progress...')
-        save_progress(model, consume)
-        print('Training initialized!')
-        return model, consume
-    else:
-        directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
-        print(f'  Loading an EchoMorph model stored in {directory}...')
-        model = load_model(directory, device, precision, verbose=True)
-        try:
-            consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
-        except:
-            print('! Consume file not found! Starting consuming from scratch!')
-            dpaths = get_dataset_paths()
-            consume = ConsumeProgress([[x, ac.total_frames(x)] for x in dpaths])
-        print('  Fetching extra info... ', end='')
-
-        new_dpaths = [x for x in get_dataset_paths() if x not in consume.paths]
-        if len(new_dpaths) > 0:
-            print(f'for {len(new_dpaths)} new files...')
-            consume.add_files([[x, ac.total_frames(x)] for x in new_dpaths])
-        else:
-            print('')
-        print('Loading progress done!')
-        return model, consume
+    if not directory:
+        save_progress(model, consume, training_params)
+    return model, consume, training_params
 
 
-def save_progress(model, consume):
+def save_progress(model, consume, training_params):
+    time.sleep(0.5)
     p_snapshots = pathlib.Path("snapshots")
     directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat().replace(':', '.')
-    save_model(directory, model)
+    os.makedirs(directory, exist_ok=True)
     pickle.dump(consume, open(directory / 'consume.bin', 'wb'))
+    pickle.dump(training_params, open(directory / 'training_params.bin', 'wb'))
+    save_model(directory, model)
     print('Saved progress.')
 
 
@@ -213,8 +221,8 @@ def take_a_bite(consume: ConsumeProgress):
     if sel is None:
         return None, None
 
-    # About 5 minutes, don't care about the bitrate and the exact value
-    cap = 45678 * 300
+    # About 10 minutes, don't care about the bitrate and the exact value
+    cap = 45678 * 600
     path, start, end = consume.bite(sel, cap)
     loaded = ac.load_audio(path, frame_offset=start, num_frames=end - start,
                            degrade_keep=random_degradation_value())
@@ -241,11 +249,50 @@ class CustomAudioDataset(Dataset):
         return self.history[idx], self.fragments[idx]
 
 
+def create_eval_datasets(model_pars: EchoMorphParameters):
+    tsl = model_pars.target_sample_len
+    hl = model_pars.history_len
+    fl = model_pars.fragment_len
+
+    eval_datasets = []
+    for dfile in get_dataset_paths(for_eval=True):
+        loaded = ac.load_audio(dfile)
+        eval_spect = ac.convert_from_wave(loaded)
+        eval_datasets += [(eval_spect[:tsl, ...], DataLoader(CustomAudioDataset(eval_spect[tsl:, ...], hl=hl, fl=fl),
+                                                            batch_size=args.batch_size, shuffle=False))]
+    return eval_datasets
+
+
+class LossNaNException(Exception):
+    pass
+
+
+def eval_model(model, eval_datasets):
+    total_loss = 0.0
+    total_items = 0
+    with torch.no_grad():
+        model.eval()
+        m_def_reps = model.pars.mid_repeat_interval
+        for middle_repeats in range(m_def_reps[0], m_def_reps[1], max(1, (m_def_reps[1] - m_def_reps[1]) // 4)):
+            for target_sample, dataloader in eval_datasets:
+                for history, fragments in iter(dataloader):
+                    pred = model(target_sample, history, fragments, middle_repeats=middle_repeats)
+                    lf = trivial_loss_function if args.use_dumb_loss_function else loss_function
+                    loss: Tensor = lf(pred.float(), fragments.float()).to(dtype=precision)
+                    if loss.isnan():
+                        raise LossNaNException()
+                    total_loss += loss.item()
+                    total_items += len(dataloader)
+    if total_items == 0:
+        return None
+    return total_loss / total_items
+
+
 loss_function_freq_significance_cache = None
 def loss_function_freq_significance(width, device):
     global loss_function_freq_significance_cache
     if loss_function_freq_significance_cache is None or loss_function_freq_significance_cache[0] != width:
-        vals = torch.arange(start=3.0, end=0, step=-3.0 / width, device=device).exp()
+        vals = torch.arange(start=4.20, end=0, step=-4.20 / width, device=device).exp()
         vals = vals / torch.sum(vals) * width
         loss_function_freq_significance_cache = width, vals
     if loss_function_freq_significance_cache[1].device != device:
@@ -290,7 +337,7 @@ def loss_function(pred, truth):
     return loss
 
 
-def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler, train_spect: Tensor, timings):
+def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
     tsl = model.pars.target_sample_len
     target_sample = train_spect[0:tsl, :]
 
@@ -311,53 +358,73 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, scheduler,
         lf = trivial_loss_function if args.use_dumb_loss_function else loss_function
         loss: Tensor = lf(pred.float(), fragments.float()).to(dtype=precision)
         if loss.isnan():
-            return None
+            raise LossNaNException()
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-    mean_loss = total_loss / len(dataloader)
-    scheduler.step(mean_loss)
+    train_loss = total_loss / len(dataloader)
     upd_timings(timings, 'training', bt)
-    return mean_loss
+    return train_loss
 
 
 def training():
-    print(f'Training initiated! Args: {args}')
-
     verify_compatibility()
 
-    model, consume = load_progress()
-    last_save = time.time()
+    print(f'Loading... Args: {args}')
+    model, consume, training_params = load_progress()
 
+    lr, = training_params
+    eval_datasets = create_eval_datasets(model.pars)
+    last_save = time.time()
     optimizer = torch.optim.Adam([
         {'params': model.get_base_parameters(),
-         'lr': args.learning_rate},
+         'lr': lr},
         {'params': model.get_multiplicating_parameters(),
-         'lr': (args.learning_rate / (sum(model.pars.mid_repeat_interval) - 1))}
+         'lr': (lr / (sum(model.pars.mid_repeat_interval) - 1))}
     ], eps=1e-4 if precision == torch.float16 else 1e-8)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.33, patience=20)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=15, min_lr=1e-8,
+                                                           threshold=0.001, threshold_mode='rel')
+
+    print(f'Training initiated!')
     timings = {}
     try:
+        bite_i = 0
+        eval_loss, cumm_train_loss = None, None
         while True:
+            if bite_i % 4 == 0:
+                bt = time.time()
+                eval_loss = eval_model(model, eval_datasets)
+                if eval_loss:
+                    print('Eval loss: {}'.format(eval_loss))
+                    scheduler.step(eval_loss)
+                elif cumm_train_loss:
+                    scheduler.step(eval_loss)
+                cumm_train_loss = 0
+                upd_timings(timings, 'eval', bt)
+
             bt = time.time()
             train_spect, origin = take_a_bite(consume)
             upd_timings(timings, 'loading', bt)
             if origin is None:
-                break
+                break  # Dataset is over
 
-            avg_loss = train_on_bite(model, optimizer, scheduler, train_spect, timings)
-            report(optimizer, consume, avg_loss, origin)
-            if avg_loss is None:
-                print('!!! BUSTED! Something exploded! This is super bad!')
-                break
+            cur_train_loss = train_on_bite(model, optimizer, train_spect, timings)
+            cumm_train_loss += cur_train_loss
+
+            report(optimizer, consume, cur_train_loss, origin)
             if last_save + args.save_time < time.time():
                 last_save = time.time()
-                save_progress(model, consume)
+                save_progress(model, consume, [optimizer.param_groups[0]['lr']])
                 print(f'Timings: {timings}')
+            bite_i += 1
     except KeyboardInterrupt:
         print('Exiting gracefully...')
+    except LossNaNException:
+        print('!!! BUSTED! Something exploded! This is super bad!')
+        print(f'Timings: {timings}')
+        exit(1)
     print(f'Timings: {timings}')
-    save_progress(model, consume)
+    save_progress(model, consume, [optimizer.param_groups[0]['lr']])
     print('Training finished!')
 
 

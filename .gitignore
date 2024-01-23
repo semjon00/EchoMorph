@@ -2,6 +2,6 @@ dataset
 dataset_developing
 snapshots
 logs
+demo
 **/.idea/**
 __pycache__
-demo

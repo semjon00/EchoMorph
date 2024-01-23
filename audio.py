@@ -49,7 +49,8 @@ class AudioConventer:
         """
         sg = self.transform_to(wv).T
         logamp = torch.clamp(torch.abs(sg), min=1e-10, max=1e2).log10()
-        logamp = (logamp + 10) / 12
+        # logamp = (logamp + 10) / 12  # Into [0;1]
+        logamp = (logamp + 4) / 12  # Into [-0.5; 0.5]
         phase = torch.angle(sg) / torch.pi
         sg = torch.cat([logamp, phase], dim=1).to(self.target_device, self.target_dtype)
         return sg
@@ -57,7 +58,7 @@ class AudioConventer:
     def convert_to_wave(self, x):
         """Reverses convert_from_wave, output precision is float32"""
         split_size = x.size(1) // 2
-        magnitude = x[..., :split_size] * 12 - 10
+        magnitude = x[..., :split_size] * 12 - 4
         magnitude = torch.clamp((magnitude * self.log10).exp(), max=100.0)
         phase = x[..., split_size:] * torch.pi
 

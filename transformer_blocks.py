@@ -131,9 +131,7 @@ class TransformerBlock(nn.Module):
         out = self.self_attn_dropout(out)
         out = self.self_attn_norm(out + res)
 
-        for cross_attn_input, cross_attn_block in zip(
-            cross_attn_inputs, self.cross_attn_blocks
-        ):
+        for cross_attn_input, cross_attn_block in zip(cross_attn_inputs, self.cross_attn_blocks):
             out = cross_attn_block(out, cross_attn_input)
 
         res = out
