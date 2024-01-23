@@ -6,7 +6,7 @@ AUDIO_FORMATS = ['aac', 'mp3', 'flac', 'wav']
 
 
 class AudioConventer:
-    def __init__(self, target_device, precision=torch.float32, sample_rate=32000, width=512, stretch=5):
+    def __init__(self, target_device, precision=torch.float32, sample_rate=32000, width=256, stretch=5):
         self.sample_rate = sample_rate
         self.n_fft = width - 2
         self.hop_length = self.n_fft // stretch

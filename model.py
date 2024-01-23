@@ -25,7 +25,7 @@ class EchoMorphParameters:
         self.target_sample_len = 8 * one_sec_len
         self.history_len = one_sec_len
         self.fragment_len = one_sec_len // 4
-        self.spect_width = 512  # x_width
+        self.spect_width = 256  # x_width
 
         self.sc_len = self.target_sample_len // 4  # Speaker characteristic shrink
         self.ir_width = self.spect_width // 4  # Intermediate representation allowance
@@ -36,17 +36,17 @@ class EchoMorphParameters:
 
         self.ae_blocks = (6, 4, 4)
         self.ae_heads = 8
-        self.ae_hidden_dim_m = 3
+        self.ae_hidden_dim_m = 2
 
-        self.ad_blocks = (4, 6, 8)
+        self.ad_blocks = (4, 6, 6)
         self.ad_heads = 8
-        self.ad_hidden_dim_m = 3
+        self.ad_hidden_dim_m = 2
 
-        self.drop = 0.001
+        self.drop = 0.005
         self.rm_k_min = 0
-        self.rm_k_max = 3 / 4
+        self.rm_k_max = 7 / 8
         self.rm_fun = 'exp'
-        self.mid_repeat_interval = (2, 6)  # (inclusive, exclusive)
+        self.mid_repeat_interval = (3, 7)  # (inclusive, exclusive)
 
         for key, value in kwargs.items():
             setattr(self, key, value)

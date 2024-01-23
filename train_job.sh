@@ -7,7 +7,7 @@
 # The job requires 1 task per node
 #SBATCH --ntasks-per-node=1
 # The maximum walltime of the job
-#SBATCH -t 02:00:00
+#SBATCH -t 10:00:00
 #SBATCH --mem=16G
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=semjon.00@gmail.com
@@ -23,7 +23,7 @@ conda activate transformers-course
 #conda install esri::einops
 
 export PYTHONUNBUFFERED=TRUE
-python training.py --save_time=1800 --batch_size=64 --baby_parameters --no_random_degradation
+python training.py --save_time=1800 --batch_size=32 --fp16
 
 # Reminder:
 #sbatch train_job.sh
