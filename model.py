@@ -19,6 +19,7 @@ from transformer_blocks import PositionalEmbedding, TransformerBlock, FeedForwar
 class EchoMorphParameters:
     """Training parameters"""
     def __init__(self, **kwargs):
+        """By default, contains large model specs"""
         one_sec_len = round(32000 / 105 / 64) * 64  # sample_rate / hop_length; approximately
 
         self.target_sample_len = 8 * one_sec_len

@@ -9,14 +9,16 @@ import pickle
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import einops
+import sys
 
 from model import EchoMorph, EchoMorphParameters, save_model, load_model
 from audio import AudioConventer, AUDIO_FORMATS
 
 import argparse
 parser = argparse.ArgumentParser(description='Training routine')
+parser.add_argument('--total_epochs', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--learning_rate', type=float, default=1e-5)
+parser.add_argument('--learning_rate', type=float, default=2e-5)
 parser.add_argument('--save_time', type=int, default=60 * 60)
 parser.add_argument('--baby_parameters', action='store_const', const=True, default=False)
 parser.add_argument('--fp16', action='store_const', const=True, default=False)
@@ -25,7 +27,7 @@ parser.add_argument('--no_random_degradation', action='store_const', const=True,
 args = parser.parse_args()
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-precision = torch.float32 if device == "cpu" and not args.fp16 else torch.float16
+precision = torch.float32 if device == "cpu" or not args.fp16 else torch.float16
 print(f"Using {device} device with {precision} precision")
 ac = AudioConventer(device, precision)
 
@@ -33,12 +35,13 @@ ac = AudioConventer(device, precision)
 def print(*args, **kwargs):
     kwargs['flush'] = True
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
+    sys.stdout.flush()
 
 
 class ConsumeProgress:
-    def __init__(self, names_and_durations, total_epochs=1):
+    def __init__(self, names_and_durations):
         self.epoch = 0
-        self.total_epochs = total_epochs
+        self.total_epochs = args.epochs
         self.paths, self.consumed, self.durations = [], [], []
 
         self.total_consumed = 0
@@ -55,10 +58,24 @@ class ConsumeProgress:
         self.durations.extend(new_durations)
         self.total_durations = sum(self.durations)
 
-        # TODO: new files should be added with "epoch 0", not current epoch
         new_consumed = [(13 * self.epoch) % 256 for _ in range(len(names_and_durations))]
         self.consumed.extend(new_consumed)
         self.total_consumed = sum(self.consumed)
+
+    def check_presence(self):
+        """Checks presence of all the dataset files. Excludes the files that are not present."""
+        remd = []
+        for i, path in enumerate(self.paths):
+            if not path.is_file():
+                remd += [i]
+        remd = set(remd)
+
+        if len(remd):
+            self.paths = [ele for idx, ele in enumerate(self.paths) if idx not in remd]
+            self.consumed = [ele for idx, ele in enumerate(self.consumed) if idx not in remd]
+            self.durations = [ele for idx, ele in enumerate(self.durations) if idx not in remd]
+            print(f'Removed {len(remd)} files from the dataset')
+
 
     def lottery_idx(self):
         if self.total_consumed == self.total_durations:
@@ -98,6 +115,8 @@ class ConsumeProgress:
         self.epoch += 1
         self.consumed = [13 * self.epoch for _ in range(len(self.consumed))]
         self.total_consumed = sum(self.consumed)
+        print(f'As the epoch took a bow, the stage was set for a grand sequel! '
+              f'"Epoch {self.epoch}, the return of epoch {self.epoch - 1}"')
         return True
 
 
@@ -179,6 +198,8 @@ def load_progress():
     except:
         consume = ConsumeProgress([])
     print(f'  Consume has {len(consume.paths)} training paths before refresh... ', end='')
+    consume.check_presence()
+    consume.total_epochs = args.total_epochs
     new_dpaths = [x for x in get_dataset_paths() if x not in consume.paths]
     consume.add_files([[x, ac.total_frames(x)] for x in new_dpaths])
     print(f'and {len(consume.paths)} files after refresh... ')
@@ -231,6 +252,7 @@ def take_a_bite(consume: ConsumeProgress):
 
 
 class CustomAudioDataset(Dataset):
+    """Provides history and fragments from given spectrogram, in an alligned way."""
     def __init__(self, train_spect, hl, fl):
         assert hl % fl == 0, 'Not implemented'
         chunks_n = train_spect.size(0) // fl
@@ -282,7 +304,7 @@ def eval_model(model, eval_datasets):
                     if loss.isnan():
                         raise LossNaNException()
                     total_loss += loss.item()
-                    total_items += len(dataloader)
+                total_items += len(dataloader)
     if total_items == 0:
         return None
     return total_loss / total_items
@@ -338,6 +360,7 @@ def loss_function(pred, truth):
 
 
 def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
+    """Train the model on the prettifyed spectrogram."""
     tsl = model.pars.target_sample_len
     target_sample = train_spect[0:tsl, :]
 
@@ -368,6 +391,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
 
 
 def training():
+    """Main training routine, start to train the model."""
     verify_compatibility()
 
     print(f'Loading... Args: {args}')

@@ -16,6 +16,8 @@
 #SBATCH --exclude=falcon2
 
 module load any/python/3.8.3-conda
+#module load ffmpeg/4.4.1
+#module load sox/14.4.2
 conda activate transformers-course
 #conda install conda-forge::ffmpeg
 #conda install esri::einops

@@ -36,6 +36,10 @@ def crop_from_middle(x, length):
 
 
 class InferenceFreestyle:
+    """InferenceFreestyle is a way to interact with the EchoMorph model. The class provides
+    methods to perform actions on the objects from the internal bank. Objects are of two types:
+    sounds and characteristics. Actions that result in creation of new objects save these objects with unique,
+    predictable and non-configureable names."""
     def __init__(self):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.precision = torch.float32 if self.device == "cpu" else torch.float16
@@ -64,6 +68,7 @@ class InferenceFreestyle:
         return name
 
     def load(self, path):
+        """Loads an object - sound or characteristic."""
         if not pathlib.Path(path).is_file():
             for cand in ['demo', 'dataset\\tests', 'dataset/tests']:
                 if (pathlib.Path(cand) / path).is_file():
@@ -81,6 +86,7 @@ class InferenceFreestyle:
             raise NotImplementedError()
 
     def save(self, name, path):
+        """Saves an object - sound or characteristic."""
         if name[0] == 's':
             if path.split('.')[-1] not in AUDIO_FORMATS:
                 path += '.wav'
@@ -94,6 +100,7 @@ class InferenceFreestyle:
             raise NotImplementedError()
 
     def play_sample(self, name):
+        """Tries its best to play a sound on your system."""
         import tempfile
         tmpfile = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         tmpfile.close()
@@ -102,6 +109,7 @@ class InferenceFreestyle:
         os.remove(tmpfile.name)
 
     def derive_sc(self, name):
+        """Derive speaker characteristic from waveform."""
         with torch.no_grad():
             print('Deriving: [', end='')
             speaker_characteristic = self.model.speaker_encoder(
@@ -111,6 +119,7 @@ class InferenceFreestyle:
             return self.to_bank('c', speaker_characteristic, f'Derived directly from {name}')
 
     def merge_sc(self, name1, name2, proportion=0.5):
+        """Merge two speaker characteristics."""
         proportion = float(proportion)
         assert 0.0 <= proportion
         obj = self.bank[name1][0] * (1.0 - proportion) + self.bank[name2][0] * proportion
