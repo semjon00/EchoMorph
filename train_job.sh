@@ -14,7 +14,6 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:tesla:1
 #SBATCH --exclude=falcon2
-#SBATCH -o logs/log.out
 
 module load any/python/3.8.3-conda
 conda activate transformers-course

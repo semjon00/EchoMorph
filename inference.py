@@ -109,17 +109,14 @@ class InferenceFreestyle:
             print('.] Done!')
             return self.to_bank('c', speaker_characteristic, f'Derived directly from {name}')
 
-    def merge_sc(self, name1, name2, proportion=None):
+    def merge_sc(self, name1, name2, proportion=0.5):
+        proportion = float(proportion)
         assert 0.0 <= proportion
-        if proportion is None:
-            proportion = 0.5
-        else:
-            proportion = int(proportion)
         obj = self.bank[name1][0] * (1.0 - proportion) + self.bank[name2][0] * proportion
         if proportion <= 1.0:
-            recipie = f'Merged from {name1} ({(1.0 - proportion):.3f}) and {name2} {proportion:.3f}'
+            recipie = f'Merged from {name1} ({(1.0 - proportion):.3f}) and {name2} ({proportion:.3f})'
         else:
-            recipie = f'Overcharged from {name2} (x{proportion:.3f}) by ' \
+            recipie = f'Overcharged from {name2} (+{proportion:.3f}) by ' \
                       f'un-tainting {name2} ({(1.0 - proportion):.3f}) from it'
         self.to_bank('c', obj, recipie)
 
