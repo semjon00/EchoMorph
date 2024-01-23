@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J train_echomorph
 # Format of the output filename: slurm-jobname.jobid.out
-#SBATCH --output=slurm-%x.%j.out
+#SBATCH --output=logs/slurm-%x.%j.out
 # The job requires 1 compute node
 #SBATCH -N 1
 # The job requires 1 task per node
@@ -20,6 +20,7 @@ conda activate transformers-course
 #conda install conda-forge::ffmpeg
 #conda install esri::einops
 
+export PYTHONUNBUFFERED=TRUE
 python training.py --save_time=1800 --batch_size=64 --baby_parameters --no_random_degradation
 
 # Reminder:

@@ -31,11 +31,12 @@ ac = AudioConventer(device, precision)
 
 
 def print(*args, **kwargs):
+    kwargs['flush'] = True
     builtins.print(datetime.datetime.now().replace(microsecond=0).isoformat(), *args, **kwargs)
 
 
 class ConsumeProgress:
-    def __init__(self, names_and_durations, total_epochs=10):
+    def __init__(self, names_and_durations, total_epochs=1):
         self.epoch = 0
         self.total_epochs = total_epochs
         self.paths, self.consumed, self.durations = [], [], []
@@ -334,24 +335,27 @@ def training():
         {'params': model.get_multiplicating_parameters(),
          'lr': (args.learning_rate / (sum(model.pars.mid_repeat_interval) - 1))}
     ], eps=1e-4 if precision == torch.float16 else 1e-8)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.7, patience=7)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.33, patience=20)
     timings = {}
-    while True:
-        bt = time.time()
-        train_spect, origin = take_a_bite(consume)
-        upd_timings(timings, 'loading', bt)
-        if origin is None:
-            break
+    try:
+        while True:
+            bt = time.time()
+            train_spect, origin = take_a_bite(consume)
+            upd_timings(timings, 'loading', bt)
+            if origin is None:
+                break
 
-        avg_loss = train_on_bite(model, optimizer, scheduler, train_spect, timings)
-        report(optimizer, consume, avg_loss, origin)
-        if avg_loss is None:
-            print('!!! BUSTED! Something exploded! This is super bad!')
-            break
-        if last_save + args.save_time < time.time():
-            last_save = time.time()
-            save_progress(model, consume)
-            print(f'Timings: {timings}')
+            avg_loss = train_on_bite(model, optimizer, scheduler, train_spect, timings)
+            report(optimizer, consume, avg_loss, origin)
+            if avg_loss is None:
+                print('!!! BUSTED! Something exploded! This is super bad!')
+                break
+            if last_save + args.save_time < time.time():
+                last_save = time.time()
+                save_progress(model, consume)
+                print(f'Timings: {timings}')
+    except KeyboardInterrupt:
+        print('Exiting gracefully...')
     print(f'Timings: {timings}')
     save_progress(model, consume)
     print('Training finished!')
