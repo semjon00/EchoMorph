@@ -26,15 +26,6 @@ def play_audio(filename):
         print('Playback not implemented...')
 
 
-def crop_from_middle(x, length):
-    if x.size(0) < length:
-        padding = torch.zeros([(length + 1) // 2, x.size(1)])
-        x = torch.cat((padding, x, padding), dim=0)
-    start = (x.size(0) - length) // 2
-    x = x[start:start + length, ...]
-    return x
-
-
 class InferenceFreestyle:
     """InferenceFreestyle is a way to interact with the EchoMorph model. The class provides
     methods to perform actions on the objects from the internal bank. Objects are of two types:
@@ -108,15 +99,30 @@ class InferenceFreestyle:
         play_audio(tmpfile.name)
         os.remove(tmpfile.name)
 
-    def derive_sc(self, name):
-        """Derive speaker characteristic from waveform."""
+    def derive_sc(self, name, repeats=1):
+        """Derives speaker characteristic from waveform. Can derive multiple and average them out."""
+        assert repeats > 0
         with torch.no_grad():
+            tsl = self.model.pars.target_sample_len
+            sg = self.bank[name][0]
+
+            if sg.size(0) < tsl:
+                padding = torch.zeros([(tsl - sg.size(0) + 2) // 2, sg.size(1)], dtype=sg.dtype, device=sg.device)
+                sg = torch.cat((padding, sg, padding), dim=0)
+
             print('Deriving: [', end='')
-            speaker_characteristic = self.model.speaker_encoder(
-                crop_from_middle(self.bank[name][0], self.model.pars.target_sample_len)
-            )
-            print('.] Done!')
-            return self.to_bank('c', speaker_characteristic, f'Derived directly from {name}')
+            out = self.model.speaker_encoder(sg[0:0+tsl, :])
+            print('.', end='')
+            start_end = sg.size(0) - out.size(0)
+            start = 0
+            for i in range(repeats - 1):
+                # Deterministic, but uniform-like distribution of starting points
+                start = (start + 2147483647) % start_end
+                out += self.model.speaker_encoder(sg[start:start+tsl, :])
+                print('.', end='')
+            print('] Done!')
+            out /= repeats
+            return self.to_bank('c', out, f'Derived directly from {name} (r={repeats})')
 
     def merge_sc(self, name1, name2, proportion=0.5):
         """Merge two speaker characteristics."""
@@ -215,6 +221,7 @@ if __name__ == '__main__':
     while True:
         try:
             cmd = input('> ').split(' ')
+            mods = {}
             match cmd[0]:
                 case 'demo':
                     demo(freestyle)
@@ -226,13 +233,15 @@ if __name__ == '__main__':
                 case 'save':
                     freestyle.save(cmd[1], ' '.join(cmd[2:]))
                 case 'derive':
-                    freestyle.derive_sc(cmd[1])
+                    for mod in cmd[2:]:
+                        if mod.startswith('r='):
+                            mods['repeats'] = int(mod[2:])
+                    freestyle.derive_sc(cmd[1], **mods)
                 case 'merge':
                     freestyle.merge_sc(*cmd[1:])
                 case 'randomize':
                     freestyle.randomize_sc(cmd[1], float(cmd[2]))
                 case 'infer':
-                    mods = {}
                     for mod in cmd[3:]:
                         if mod.startswith('q='):
                             mods['quality'] = int(mod[2:])
