@@ -38,6 +38,15 @@ def print(*args, **kwargs):
     sys.stdout.flush()
 
 
+def print_cuda_stats():
+    if str(device) == "cpu":
+        return
+    try:
+        vals = torch.cuda.mem_get_info()
+        print(f'Cuda memory consumption: {str(vals)}')
+    except:
+        print('Failed to display cuda memory consumption.')
+
 class ConsumeProgress:
     def __init__(self, names_and_durations):
         self.epoch = 0
@@ -408,7 +417,7 @@ def training():
     ], eps=1e-4 if precision == torch.float16 else 1e-8)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=15, min_lr=1e-8,
                                                            threshold=0.001, threshold_mode='rel')
-
+    print_cuda_stats()
     print(f'Training initiated!')
     timings = {}
     try:
