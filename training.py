@@ -314,7 +314,8 @@ loss_function_freq_significance_cache = None
 def loss_function_freq_significance(width, device):
     global loss_function_freq_significance_cache
     if loss_function_freq_significance_cache is None or loss_function_freq_significance_cache[0] != width:
-        vals = torch.arange(start=4.20, end=0, step=-4.20 / width, device=device).exp()
+        vals = torch.arange(start=20, end=16000 * (width + 1) / width, step=16000 / 128).log2()
+        vals = vals[1:] - vals[:-1]
         vals = vals / torch.sum(vals) * width
         loss_function_freq_significance_cache = width, vals
     if loss_function_freq_significance_cache[1].device != device:
@@ -349,7 +350,7 @@ def loss_function(pred, truth):
     phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
     # Clamp to [0;1], where 1 is the opposite phase
     phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
-    phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 4
+    phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 3
     # Correct phase is not as important as correct amplitude
 
     # We want to minimize distance squared.
