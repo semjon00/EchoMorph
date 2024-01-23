@@ -185,10 +185,10 @@ def load_progress():
         pass
     print(f'  Snapshot directory {directory}')
 
-    if directory:
+    try:
         model = load_model(directory, device, precision, verbose=True)
         print(f'  Loaded an EchoMorph model.')
-    else:
+    except:
         pars = EchoMorphParameters(**overrided_pars)
         model = EchoMorph(pars).to(device=device, dtype=precision)
         print('  Initialized a new EchoMorph model...')
