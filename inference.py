@@ -33,7 +33,7 @@ class InferenceFreestyle:
     predictable and non-configureable names."""
     def __init__(self):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.precision = torch.float32 if self.device == "cpu" else torch.float16
+        self.precision = torch.float32 if str(self.device) == "cpu" else torch.float16
         self.ac = AudioConventer(self.device, self.precision)
 
         root_snapshots = pathlib.Path("snapshots")

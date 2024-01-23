@@ -217,7 +217,7 @@ def load_model(directory, device, dtype, verbose=False):
     except:
         pars = EchoMorphParameters()
     model = EchoMorph(pars).to(device=device, dtype=dtype)
-    model.load_state_dict(torch.load(directory / 'model.bin'))
+    model.load_state_dict(torch.load(directory / 'model.bin', map_location=device))
     if verbose:
         print(f'Model parameters: {dict(model.pars.__dict__.items())}')
     return model

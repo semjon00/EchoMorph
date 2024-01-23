@@ -47,7 +47,7 @@ class AudioConventer:
         Then, re-encodes the spectrogram as a stack
         of normalized log-amplitudes and phases in interval (from -1 to +1).
         """
-        sg = self.transform_to(wv).T
+        sg = self.transform_to(wv.to(self.target_dtype)).T
         logamp = torch.clamp(torch.abs(sg), min=1e-10, max=1e2).log10()
         # logamp = (logamp + 10) / 12  # Into [0;1]
         logamp = (logamp + 4) / 12  # Into [-0.5; 0.5]

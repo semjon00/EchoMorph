@@ -27,7 +27,7 @@ parser.add_argument('--no_random_degradation', action='store_const', const=True,
 args = parser.parse_args()
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-precision = torch.float32 if device == "cpu" or not args.fp16 else torch.float16
+precision = torch.float32 if str(device) == "cpu" or not args.fp16 else torch.float16
 print(f"Using {device} device with {precision} precision")
 ac = AudioConventer(device, precision)
 
@@ -41,7 +41,7 @@ def print(*args, **kwargs):
 class ConsumeProgress:
     def __init__(self, names_and_durations):
         self.epoch = 0
-        self.total_epochs = args.epochs
+        self.total_epochs = args.total_epochs
         self.paths, self.consumed, self.durations = [], [], []
 
         self.total_consumed = 0
@@ -350,7 +350,6 @@ def loss_function(pred, truth):
     # Clamp to [0;1], where 1 is the opposite phase
     phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
     phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 4
-    phase_distance *= truth[..., :width]  # Phase is as much important as amplitude of the wave (log - meh)
     # Correct phase is not as important as correct amplitude
 
     # We want to minimize distance squared.
@@ -360,7 +359,7 @@ def loss_function(pred, truth):
 
 
 def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
-    """Train the model on the prettifyed spectrogram."""
+    """Train the model on the prettified spectrogram."""
     tsl = model.pars.target_sample_len
     target_sample = train_spect[0:tsl, :]
 
