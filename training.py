@@ -254,8 +254,13 @@ def take_a_bite(consume: ConsumeProgress):
     # About 10 minutes, don't care about the bitrate and the exact value
     cap = 45678 * 600
     path, start, end = consume.bite(sel, cap)
-    loaded = ac.load_audio(path, frame_offset=start, num_frames=end - start,
-                           degrade_keep=random_degradation_value())
+    loaded = None
+    try:
+        loaded = ac.load_audio(path, frame_offset=start, num_frames=end - start,
+                               degrade_keep=random_degradation_value())
+    except:
+        print(f"Pain... could not load audio file {str(path)}!")
+        return take_a_bite(consume)
     sg = ac.convert_from_wave(loaded)
     return sg, path
 
