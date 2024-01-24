@@ -1,3 +1,4 @@
+#!/usr/bin/python -u
 import torch
 import os
 import pathlib
@@ -113,9 +114,9 @@ class InferenceFreestyle:
             print('Deriving: [', end='')
             out = self.model.speaker_encoder(sg[0:0+tsl, :])
             print('.', end='')
-            start_end = sg.size(0) - out.size(0)
+            start_end = sg.size(0) - tsl
             start = 0
-            for i in range(repeats - 1):
+            for i in range(1, repeats):
                 # Deterministic, but uniform-like distribution of starting points
                 start = (start + 2147483647) % start_end
                 out += self.model.speaker_encoder(sg[start:start+tsl, :])
