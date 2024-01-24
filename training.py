@@ -179,9 +179,9 @@ def get_dataset_paths(for_eval=False):
 def load_progress():
     if args.baby_parameters:
         overrided_pars = {'se_blocks': 2,
-                          'ae_blocks': (2, 2, 4), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
-                          'ad_blocks': (2, 4, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
-                          'rm_k_min': 0.8, 'rm_k_max': 0.8, 'mid_repeat_interval': (2, 4)}
+                          'ae_blocks': (2, 2, 4), 'ae_heads': 4, 'ae_hidden_dim_m': 2,
+                          'ad_blocks': (2, 4, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 2,
+                          'rm_k_min': 1.0, 'rm_k_max': 1.0, 'mid_repeat_interval': (2, 5)}
     else:
         overrided_pars = {}
 
@@ -251,7 +251,7 @@ def take_a_bite(consume: ConsumeProgress):
     if sel is None:
         return None, None
 
-    # About 10 minutes, don't care about the bitrate and the exact value
+    # About 10 minutes, don't care about the sample rate and the exact value
     cap = 45678 * 600
     path, start, end = consume.bite(sel, cap)
     loaded = ac.load_audio(path, frame_offset=start, num_frames=end - start,

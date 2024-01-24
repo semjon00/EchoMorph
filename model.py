@@ -28,7 +28,7 @@ class EchoMorphParameters:
         self.spect_width = 256  # x_width
 
         self.sc_len = self.target_sample_len // 4  # Speaker characteristic shrink
-        self.ir_width = self.spect_width // 4  # Intermediate representation allowance
+        self.ir_width = self.spect_width // 2  # Intermediate representation allowance
 
         self.se_blocks = 8
         self.se_heads = 8
@@ -93,26 +93,33 @@ class AudioCoder(nn.Module):
 
 class SpeakerEncoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
-        super().__init__(pars.spect_width, pars.se_hidden_dim_m, pars.se_heads, pars.target_sample_len,
+        super().__init__(pars.spect_width, pars.se_hidden_dim_m, pars.se_heads, pars.target_sample_len // 2,
                          pars.drop, (pars.se_blocks, 0, 0), 0, (0, 1))
+        self.conv1 = torch.nn.Conv1d(pars.target_sample_len, pars.target_sample_len, kernel_size=3, padding=1)
+        self.conv2 = torch.nn.Conv1d(pars.spect_width, pars.spect_width, kernel_size=3, stride=2, padding=1)
+        self.gelu = torch.nn.GELU()
         self.pos_embed = PositionalEmbedding(
-            seq_len=pars.target_sample_len,
+            seq_len=pars.target_sample_len // 2,
             embed_dim=pars.spect_width
         )
         self.dropout = nn.Dropout(pars.drop)
-        self.squeeze_k = pars.target_sample_len // pars.sc_len
+        self.sc_len = pars.sc_len
 
     def forward(self, x: Tensor) -> Tensor:
+        x = torch.transpose(self.gelu(self.conv1(x)), -1, -2)
+        x = torch.transpose(self.gelu(self.conv2(x)), -1, -2)
         x = self.pos_embed(x)
         x = self.dropout(x)
         x = super().forward(x, [])
-        x = einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
+        x = einops.rearrange(x, '... (k l) w -> ... l k w', k=x.size(-2) // self.sc_len).sum(dim=-2)
         return x
 
 class AudioEncoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.ae_hidden_dim_m, pars.ae_heads, pars.fragment_len,
                          pars.drop, pars.ae_blocks, 1, pars.mid_repeat_interval)
+        self.conv = torch.nn.Conv1d(pars.fragment_len, pars.fragment_len, kernel_size=3, padding=1)
+        self.gelu = torch.nn.GELU()
         self.pos_embed = PositionalEmbedding(
             seq_len=pars.fragment_len,
             embed_dim=pars.spect_width
@@ -120,6 +127,7 @@ class AudioEncoder(AudioCoder):
         self.out_w = pars.ir_width
 
     def forward(self, x: Tensor, history: Tensor, mid_rep=None) -> Tensor:
+        x = self.gelu(self.conv(x))
         x = self.pos_embed(x)
         x = self.dropout(x)
         x = super().forward(x, [history], mid_rep=mid_rep)
@@ -130,13 +138,18 @@ class AudioEncoder(AudioCoder):
 class AudioDecoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.ad_hidden_dim_m, pars.ad_heads, pars.fragment_len,
-                         pars.drop, pars.ad_blocks, 2, pars.mid_repeat_interval)
-        self.finish = nn.ModuleList([FeedForward(pars.spect_width, pars.spect_width) for _ in range(2)])
+                         pars.drop, pars.ad_blocks, 3, pars.mid_repeat_interval)
+        self.pos_embed = PositionalEmbedding(
+            seq_len=pars.fragment_len,
+            embed_dim=pars.spect_width
+        )
+        self.ff = FeedForward(pars.spect_width, pars.spect_width)
+        self.conv = torch.nn.Conv1d(pars.fragment_len, pars.fragment_len, kernel_size=3, padding=1)
 
-    def forward(self, x: Tensor, speaker_characteristic: Tensor, history: Tensor, mid_rep=None) -> Tensor:
-        x = super().forward(x, [speaker_characteristic, history], mid_rep=mid_rep)
-        for layer in self.finish:
-            x = layer(x)
+    def forward(self, ir: Tensor, speaker_characteristic: Tensor, history: Tensor, mid_rep=None) -> Tensor:
+        x = self.pos_embed(torch.zeros_like(ir))
+        x = super().forward(x, [history, ir, speaker_characteristic], mid_rep=mid_rep)
+        x = self.conv(self.ff(x))
         return x
 
 
@@ -167,7 +180,7 @@ class RandoMask(nn.Module):
 
     def forward(self, x: Tensor):
         els = x.shape[-2]
-        pp = self.rng.random() if self.mode == 'r' else self.k_min
+        pp = self.rng.random() if self.mode == 'r' else 0.0
         if self.fun == 'lin':
             pels = els * (pp * (self.k_max - self.k_min) + self.k_min)
         elif self.fun == 'exp':
