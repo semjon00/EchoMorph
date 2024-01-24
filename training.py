@@ -21,13 +21,12 @@ parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--learning_rate', type=float, default=2e-5)
 parser.add_argument('--save_time', type=int, default=60 * 60)
 parser.add_argument('--baby_parameters', action='store_const', const=True, default=False)
-parser.add_argument('--fp16', action='store_const', const=True, default=False)
 parser.add_argument('--use_dumb_loss_function', action='store_const', const=True, default=False)
 parser.add_argument('--no_random_degradation', action='store_const', const=True, default=False)
 args = parser.parse_args()
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-precision = torch.float32 if str(device) == "cpu" or not args.fp16 else torch.float16
+precision = torch.float32  # fp16 is a scam, it does not converge! I repeat, do not try fp16!
 print(f"Using {device} device with {precision} precision")
 ac = AudioConventer(device, precision)
 
@@ -419,7 +418,7 @@ def training():
          'lr': lr},
         {'params': model.get_multiplicating_parameters(),
          'lr': (lr / (sum(model.pars.mid_repeat_interval) - 1))}
-    ], eps=1e-4 if precision == torch.float16 else 1e-8)
+    ])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=15, min_lr=1e-8,
                                                            threshold=0.001, threshold_mode='rel')
     print_cuda_stats()
