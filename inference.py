@@ -159,15 +159,8 @@ class InferenceFreestyle:
         # TODO: multi-merge (averaging multiple infer-s with slightly different windowing)
         # Updating model settings
         assert 0 <= quality
-        for mp in [self.model.audio_encoder, self.model.audio_decoder]:
-            mp.set_mid_repeat_interval(quality)
-        self.model.rando_mask.set_p(tradeoff)
+        self.model.set_mid_repeat_interval(quality)
 
-        do_lerp = '->' in sc_name
-        if do_lerp:
-            sc = [self.bank[x][0] for x in sc_name.split('->')]
-        else:
-            sc = self.bank[sc_name][0]
         source = self.bank[source_name][0]
 
         hl = self.model.pars.history_len
@@ -177,17 +170,11 @@ class InferenceFreestyle:
         with torch.no_grad():
             print('Inferencing: [', end='')
             for cur in range(hl, target.size(0) - fl, fl):
-                if do_lerp:
-                    lerp_c = (cur - hl) / (target.size(0) - hl)
-                    cur_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
-                else:
-                    cur_sc = sc
-                intermediate = self.model.audio_encoder(source[cur:cur + fl, :], source[cur - hl:cur, :])
+                intermediate = self.model(source[cur:cur + fl, :], source[cur - hl:cur, :])
                 if radiation > 1e-9:
                     intermediate += torch.where(intermediate == 0, torch.tensor(0),
                                                 torch.randn_like(intermediate) * radiation)
-                intermediate = self.model.rando_mask(intermediate)
-                target[cur:cur + fl, :] = self.model.audio_decoder(intermediate, cur_sc, target[cur - hl:cur, :])
+                target[cur:cur + fl, :] = intermediate
                 print('.', end='')
             print('] Done!')
 
@@ -244,11 +231,6 @@ if __name__ == '__main__':
                     freestyle.load(' '.join(cmd[1:]))
                 case 'save':
                     freestyle.save(cmd[1], ' '.join(cmd[2:]))
-                case 'derive':
-                    for mod in cmd[2:]:
-                        if mod.startswith('r='):
-                            mods['repeats'] = int(mod[2:])
-                    freestyle.derive_sc(cmd[1], **mods)
                 case 'merge':
                     freestyle.merge_sc(*cmd[1:])
                 case 'randomize':

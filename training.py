@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 import einops
 import sys
 
-from model import EchoMorph, EchoMorphParameters, save_model, load_model
+from model import EchoMorph, EchoMorphParameters, save_model, load_model, AudioEncoder
 from audio import AudioConventer, AUDIO_FORMATS
 
 import argparse
@@ -176,14 +176,6 @@ def get_dataset_paths(for_eval=False):
 
 
 def load_progress():
-    if args.baby_parameters:
-        overrided_pars = {'se_blocks': 2,
-                          'ae_blocks': (2, 2, 4), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
-                          'ad_blocks': (2, 4, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
-                          'rm_k_min': 0.8, 'rm_k_max': 0.8, 'mid_repeat_interval': (2, 4)}
-    else:
-        overrided_pars = {}
-
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
     directory = None
@@ -193,13 +185,15 @@ def load_progress():
         pass
     print(f'  Snapshot directory {directory}')
 
+    overrided_pars = {'ae_blocks': (2, 0, 0), 'ae_heads': 4, 'ae_hidden_dim_m': 2, 'ir_width': 256}
+    pars = EchoMorphParameters(**overrided_pars)
     try:
         model = load_model(directory, device, precision, verbose=True)
         print(f'  Loaded an EchoMorph model.')
     except:
-        pars = EchoMorphParameters(**overrided_pars)
-        model = EchoMorph(pars).to(device=device, dtype=precision)
+        model = AudioEncoder(pars).to(device=device, dtype=precision)
         print('  Initialized a new EchoMorph model...')
+    model.pars = pars
 
     try:
         consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
@@ -311,7 +305,7 @@ def eval_model(model, eval_datasets):
         for middle_repeats in range(m_def_reps[0], m_def_reps[1], max(1, (m_def_reps[1] - m_def_reps[1]) // 4)):
             for target_sample, dataloader in eval_datasets:
                 for history, fragments in iter(dataloader):
-                    pred = model(target_sample, history, fragments, middle_repeats=middle_repeats)
+                    pred = model(fragments, history)
                     lf = trivial_loss_function if args.use_dumb_loss_function else loss_function
                     loss: Tensor = lf(pred.float(), fragments.float()).to(dtype=precision)
                     if loss.isnan():
@@ -363,7 +357,7 @@ def loss_function(pred, truth):
     phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
     # Clamp to [0;1], where 1 is the opposite phase
     phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
-    phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 3
+    phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 4
     # Correct phase is not as important as correct amplitude
 
     # We want to minimize distance squared.
@@ -390,7 +384,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
     model.train()
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
-        pred = model(target_sample, history, fragments)
+        pred = model(fragments, history)
         lf = trivial_loss_function if args.use_dumb_loss_function else loss_function
         loss: Tensor = lf(pred.float(), fragments.float()).to(dtype=precision)
         if loss.isnan():
@@ -414,12 +408,10 @@ def training():
     eval_datasets = create_eval_datasets(model.pars)
     last_save = time.time()
     optimizer = torch.optim.Adam([
-        {'params': model.get_base_parameters(),
-         'lr': lr},
-        {'params': model.get_multiplicating_parameters(),
-         'lr': (lr / (sum(model.pars.mid_repeat_interval) - 1))}
+        {'params': model.parameters(),
+         'lr': lr}
     ])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=15, min_lr=1e-8,
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5, min_lr=1e-8,
                                                            threshold=0.001, threshold_mode='rel')
     print_cuda_stats()
     print(f'Training initiated!')
@@ -468,5 +460,6 @@ def training():
 
 
 if __name__ == '__main__':
+    print("TESTING MODE, NOT THE ACTUAL MODEL!!!")
     training()
     # Use like: python training.py --save_time=90 --batch_size=16

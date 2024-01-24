@@ -211,15 +211,14 @@ class EchoMorph(nn.Module):
 
 
 def load_model(directory, device, dtype, verbose=False):
-    # TODO: load safer
-    try:
-        pars = pickle.load(open(directory / 'parameters.bin', 'rb'))
-    except:
-        pars = EchoMorphParameters()
-    model = EchoMorph(pars).to(device=device, dtype=dtype)
+    overrided_pars = {'ae_blocks': (2, 0, 0), 'ae_heads': 4, 'ae_hidden_dim_m': 2, 'ir_width': 256}
+    pars = EchoMorphParameters(**overrided_pars)
+    model = AudioEncoder(pars).to(device=device, dtype=dtype)
     model.load_state_dict(torch.load(directory / 'model.bin', map_location=device))
+    model.pars = pars
     if verbose:
         print(f'Model parameters: {dict(model.pars.__dict__.items())}')
+        print(f'ENCODER ONLY')
     return model
 
 def save_model(directory, model: EchoMorph):
