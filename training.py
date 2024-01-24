@@ -188,7 +188,7 @@ def load_progress():
     os.makedirs(p_snapshots, exist_ok=True)
     directory = None
     try:
-        directory = p_snapshots / sorted(os.listdir(p_snapshots))[-1]
+        directory = p_snapshots / sorted([x for x in os.listdir(p_snapshots) if 'disable' not in x])[-1]
     except:
         pass
     print(f'  Snapshot directory {directory}')

@@ -42,7 +42,7 @@ class InferenceFreestyle:
             print('No model snapshot means no inference is possible.')
             print('Put a snapshot into the snapshots folder.')
             exit(1)
-        directory = root_snapshots / sorted(os.listdir(root_snapshots))[-1]
+        directory = root_snapshots / sorted([x for x in os.listdir(root_snapshots) if 'disable' not in x])[-1]
         print(f'Loading an EchoMorph model stored in {directory}... ', end='')
         self.model = load_model(directory, self.device, self.precision)
         self.model.eval()
@@ -90,6 +90,17 @@ class InferenceFreestyle:
             torch.save(self.bank[name][0], path)
         else:
             raise NotImplementedError()
+
+    def cap_freq(self, name, percent):
+        percent = float(percent)
+        obj: torch.Tensor = self.bank[name][0]
+        bor = obj.size(-1) // 2
+        preserve = round(bor * percent / 100)
+        capped_obj = torch.clone(obj)
+        capped_obj[..., preserve:bor] = 0
+        capped_obj[..., bor+preserve:bor+bor] = 0
+        self.to_bank('s', capped_obj, f'Capped from {name} (passed: {percent}%)')
+
 
     def play_sample(self, name):
         """Tries its best to play a sound on your system."""
@@ -253,6 +264,8 @@ if __name__ == '__main__':
                     if cmd[1][0] == 's' and cmd[2][0] == 'c':
                         cmd[1], cmd[2] = cmd[2], cmd[1]
                     freestyle.infer(cmd[1], cmd[2], **mods)
+                case 'cap':
+                    freestyle.cap_freq(cmd[1], cmd[2])
                 case 'play':
                     freestyle.play_sample(cmd[1])
                 case 'list':
