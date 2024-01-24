@@ -6,7 +6,7 @@ import einops
 class PositionalEmbedding(nn.Module):
     def __init__(self, seq_len: int, embed_dim: int):
         super().__init__()
-        self.pos_embed = nn.Parameter(torch.zeros(seq_len, embed_dim))
+        self.pos_embed = nn.Parameter(torch.rand(seq_len, embed_dim) * 0.01)
 
     def forward(self, x: T) -> T:
         return x + self.pos_embed  # seq_len is *always* constant in our case

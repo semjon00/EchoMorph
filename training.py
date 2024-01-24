@@ -454,6 +454,8 @@ def training():
                 save_progress(model, consume, [optimizer.param_groups[0]['lr']])
                 print(f'Timings: {timings}')
             bite_i += 1
+            if bite_i == 1:
+                print_cuda_stats()
     except KeyboardInterrupt:
         print('Exiting gracefully...')
     except LossNaNException:
