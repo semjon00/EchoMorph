@@ -23,7 +23,7 @@ conda activate transformers-course
 #conda install esri::einops
 
 export PYTHONUNBUFFERED=TRUE
-python training.py --save_time=1800 --batch_size=32
+python training.py --save_time=1800 --batch_size=32 --total_epochs=20
 
 # Reminder:
 #sbatch train_job.sh

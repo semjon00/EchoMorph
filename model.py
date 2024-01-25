@@ -130,11 +130,11 @@ class AudioEncoder(AudioCoder):
 class AudioDecoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.ad_hidden_dim_m, pars.ad_heads, pars.fragment_len,
-                         pars.drop, pars.ad_blocks, 2, pars.mid_repeat_interval)
+                         pars.drop, pars.ad_blocks, 3, pars.mid_repeat_interval)
         self.finish = nn.ModuleList([FeedForward(pars.spect_width, pars.spect_width) for _ in range(2)])
 
     def forward(self, x: Tensor, speaker_characteristic: Tensor, history: Tensor, mid_rep=None) -> Tensor:
-        x = super().forward(x, [speaker_characteristic, history], mid_rep=mid_rep)
+        x = super().forward(x, [speaker_characteristic, history, x], mid_rep=mid_rep)
         for layer in self.finish:
             x = layer(x)
         return x
