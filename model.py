@@ -23,30 +23,30 @@ class EchoMorphParameters:
         one_sec_len = round(32000 / 105 / 64) * 64  # sample_rate / hop_length; approximately
 
         self.target_sample_len = 8 * one_sec_len
-        self.history_len = one_sec_len
+        self.history_len = one_sec_len // 2
         self.fragment_len = one_sec_len // 4
         self.spect_width = 256  # x_width
 
-        self.sc_len = self.target_sample_len // 4  # Speaker characteristic shrink
-        self.ir_width = self.spect_width // 4  # Intermediate representation allowance
+        self.sc_len = one_sec_len // 2  # Speaker characteristic shrink
+        self.ir_width = self.spect_width  # Intermediate representation allowance
 
-        self.se_blocks = 8
+        self.se_blocks = 4
         self.se_heads = 8
         self.se_hidden_dim_m = 3
 
-        self.ae_blocks = (6, 4, 4)
-        self.ae_heads = 8
+        self.ae_blocks = (2, 2, 0)
+        self.ae_heads = 4
         self.ae_hidden_dim_m = 2
 
-        self.ad_blocks = (4, 6, 6)
+        self.ad_blocks = (0, 2, 2)
         self.ad_heads = 8
         self.ad_hidden_dim_m = 2
 
-        self.drop = 0.005
-        self.rm_k_min = 0
-        self.rm_k_max = 7 / 8
+        self.drop = 0.01
+        self.rm_k_min = 5 / 8
+        self.rm_k_max = 8 / 8
         self.rm_fun = 'exp'
-        self.mid_repeat_interval = (3, 7)  # (inclusive, exclusive)
+        self.mid_repeat_interval = (2, 5)  # (inclusive, exclusive)
 
         for key, value in kwargs.items():
             setattr(self, key, value)
