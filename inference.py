@@ -79,12 +79,12 @@ class InferenceFreestyle:
 
     def save(self, name, path):
         """Saves an object - sound or characteristic."""
-        if name[0] == 's':
+        if name[0].startswith('s'):
             if path.split('.')[-1] not in AUDIO_FORMATS:
                 path += '.wav'
             audio = self.ac.convert_to_wave(self.bank[name][0])
             self.ac.save_audio(audio, path)
-        elif name[0] == 'c':
+        elif name[0].startswith('c'):
             if path.split('.')[-1] not in ['emc']:
                 path += '.emc'
             torch.save(self.bank[name][0], path)
@@ -101,6 +101,11 @@ class InferenceFreestyle:
         capped_obj[..., bor+preserve:bor+bor] = 0
         self.to_bank('s', capped_obj, f'Capped from {name} (passed: {percent}%)')
 
+    def _play_object(self, object):
+        import datetime
+        time = datetime.datetime.now().replace(microsecond=0).strftime("%H:%M:%S")
+        code = self.to_bank('sd', object, f'Debug object spawned at {time}')
+        self.play_sample(code)
 
     def play_sample(self, name):
         """Tries its best to play a sound on your system."""
@@ -182,12 +187,16 @@ class InferenceFreestyle:
                     cur_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
                 else:
                     cur_sc = sc
-                intermediate = self.model.audio_encoder(source[cur:cur + fl, :], source[cur - hl:cur, :])
+                intermediate = self.model.audio_encoder(
+                    source[cur:cur + fl, :].unsqueeze(0), source[cur - hl:cur, :].unsqueeze(0)
+                )
                 if radiation > 1e-9:
                     intermediate += torch.where(intermediate == 0, torch.tensor(0),
                                                 torch.randn_like(intermediate) * radiation)
                 intermediate = self.model.rando_mask(intermediate)
-                target[cur:cur + fl, :] = self.model.audio_decoder(intermediate, cur_sc, target[cur - hl:cur, :])
+                target[cur:cur + fl, :] = self.model.audio_decoder(
+                    intermediate, cur_sc, target[cur - hl:cur, :].unsqueeze(0)
+                )
                 print('.', end='')
             print('] Done!')
 
