@@ -177,15 +177,15 @@ def get_dataset_paths(for_eval=False):
 
 def load_progress():
     if args.baby_parameters:
-        one_sec_len = round(32000 / 105 / 64) * 64
+        one_sec_len = round(24000 / 84 / 64) * 64
         overrided_pars = {
             'target_sample_len': 4 * one_sec_len, 'history_len': one_sec_len // 4, 'fragment_len': one_sec_len // 4,
             'sc_len': one_sec_len // 4,
             'spect_width': 256, 'ir_width': 256,
             'se_blocks': 2,
             'ae_blocks': (2, 0, 0), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
-            'ad_blocks': (2, 0, 0), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
-            'rm_k_min': 0.8, 'rm_k_max': 1.0, 'mid_repeat_interval': (2, 4)
+            'ad_blocks': (0, 0, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
+            'rm_k_min': 0.9, 'rm_k_max': 1.0, 'mid_repeat_interval': (2, 4)
         }
     else:
         overrided_pars = {}

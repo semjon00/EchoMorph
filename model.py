@@ -20,9 +20,9 @@ class EchoMorphParameters:
     """Training parameters"""
     def __init__(self, **kwargs):
         """By default, contains large model specs"""
-        one_sec_len = round(32000 / 105 / 64) * 64  # sample_rate / hop_length; approximately
+        one_sec_len = round(24000 / 84 / 64) * 64  # sample_rate / hop_length; approximately
 
-        self.target_sample_len = 8 * one_sec_len
+        self.target_sample_len = 4 * one_sec_len
         self.history_len = one_sec_len // 2
         self.fragment_len = one_sec_len // 4
         self.spect_width = 256  # x_width
@@ -167,7 +167,7 @@ class RandoMask(nn.Module):
 
     def forward(self, x: Tensor):
         els = x.shape[-2]
-        pp = self.rng.random() if self.mode == 'r' else self.k_min
+        pp = self.rng.random() if self.mode == 'r' else 0.0
         if self.fun == 'lin':
             pels = els * (pp * (self.k_max - self.k_min) + self.k_min)
         elif self.fun == 'exp':
