@@ -48,7 +48,7 @@ def print_cuda_stats():
 
 class ConsumeProgress:
     def __init__(self, names_and_durations):
-        self.epoch = 1
+        self.epoch = 0
         self.total_epochs = args.total_epochs
         self.paths, self.consumed, self.durations = [], [], []
 
@@ -118,9 +118,9 @@ class ConsumeProgress:
         return self.paths[idx], start, end
 
     def epoch_rollover(self):
-        if self.epoch == self.total_epochs:
-            return False
         self.epoch += 1
+        if self.epoch >= self.total_epochs:
+            return False
         self.consumed = [13 * self.epoch for _ in range(len(self.consumed))]
         self.total_consumed = sum(self.consumed)
         print(f'As the epoch took a bow, the stage was set for a grand sequel! '
@@ -357,24 +357,39 @@ def loss_function(pred, truth):
     #  * large undershoot = "masked"
     width = pred.size(-1) // 2
 
-    amp_to_phase_significance = 4  # Phase is not as important as amplitude
+    amp_to_phase_significance = 4.0  # Phase is not as important as amplitude
+    diff_to_val_significance = 0.8
 
     # This amp code is no more sane than the person who wrote it was when they wrote it
     # Pretty much all the things are eye-balled and not rigorously determined
     truth_amp = truth[..., :width]
     pred_amp = pred[..., :width]
     amp_distance = truth_amp - pred_amp
+    amp_jitter = torch.clamp(torch.abs(amp_distance[..., 1:, :] - amp_distance[..., :-1, :]) -
+                             torch.abs(truth_amp[..., 1:, :] - truth_amp[..., :-1, :]), min=0.0)
     # Undershoot = bad; overshoot = veeeery baaaad
     amp_distance = torch.max(amp_distance, 2.0 * (-amp_distance))
+    # Jitter (overshooting and then immediately undershooting) is very bad
+    amp_distance[..., 1:, :] += amp_jitter * diff_to_val_significance
     # Frequency ranges are not created equal
     amp_distance *= loss_function_freq_significance(width, amp_distance.device)
 
-    # Phase part of the spectrogram works like a circle.
-    phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
-    # Clamp to [0;1], where 1 is the opposite phase
-    phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
+    # Phase is also important
+    def phase_diff(vals1, vals2):
+        # Phase part of the spectrogram works like a circle.
+        vals = torch.abs(vals1 - vals2) % 2.0
+        # Clamp to [0;1], where 1 is the opposite phase
+        return torch.min(vals, vals * (-1.0) + 2.0)
+    truth_phase = truth[..., width:]
+    pred_phase = pred[..., width:]
+
+    phase_distance = phase_diff(truth_phase, pred_phase)
+    # Add phase jitter
+    phase_jitter = torch.clamp(phase_diff(pred_phase[..., 1:, :], pred_phase[..., :-1, :]) -
+                               phase_diff(truth_phase[..., 1:, :], truth_phase[..., :-1, :]), min=0.0)
+    phase_distance[..., 1:, :] += phase_jitter * diff_to_val_significance
     # Phase is more important for more prominent frequencies
-    phase_distance *= (truth_amp + truth_amp.min()) / (0.00001 + truth_amp.max() - truth_amp.min())
+    phase_distance *= (truth_amp + truth_amp.min()) / torch.clamp(truth_amp.max() - truth_amp.min(), min=0.01)
     # Frequency ranges are not created equal
     phase_distance *= loss_function_freq_significance(width, amp_distance.device)
 
