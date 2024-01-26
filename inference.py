@@ -38,11 +38,13 @@ class InferenceFreestyle:
         self.ac = AudioConventer(self.device, self.precision)
 
         root_snapshots = pathlib.Path("snapshots")
-        if not root_snapshots.is_dir() or len(os.listdir(root_snapshots)) == 0:
+        available_snapshots = sorted([x for x in os.listdir(root_snapshots) if 'disable' not in x])
+
+        if len(available_snapshots) == 0:
             print('No model snapshot means no inference is possible.')
             print('Put a snapshot into the snapshots folder.')
             exit(1)
-        directory = root_snapshots / sorted([x for x in os.listdir(root_snapshots) if 'disable' not in x])[-1]
+        directory = root_snapshots / available_snapshots[-1]
         print(f'Loading an EchoMorph model stored in {directory}... ', end='')
         self.model = load_model(directory, self.device, self.precision)
         self.model.eval()

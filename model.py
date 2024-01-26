@@ -1,3 +1,4 @@
+import json
 from itertools import chain
 import numpy as np
 import torch
@@ -15,6 +16,8 @@ from transformer_blocks import PositionalEmbedding, TransformerBlock, FeedForwar
 #       Currently it consumes too much memory.
 
 # TODO: Maybe use intermediate representation for autoregressive feeding of history?
+
+# TODO: Explore better compression methods
 
 class EchoMorphParameters:
     """Training parameters"""
@@ -91,6 +94,7 @@ class AudioCoder(nn.Module):
             x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
         return x
 
+
 class SpeakerEncoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(pars.spect_width, pars.se_hidden_dim_m, pars.se_heads, pars.target_sample_len,
@@ -108,6 +112,7 @@ class SpeakerEncoder(AudioCoder):
         x = super().forward(x, [])
         x = einops.rearrange(x, '... (k l) w -> ... l k w', k=self.squeeze_k).sum(dim=-2)
         return x
+
 
 class AudioEncoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
@@ -211,18 +216,20 @@ class EchoMorph(nn.Module):
 
 
 def load_model(directory, device, dtype, verbose=False):
-    # TODO: load safer
     try:
-        pars = pickle.load(open(directory / 'parameters.bin', 'rb'))
+        recipie = json.load(open(directory / 'parameters.json', 'rb'))
+        pars = EchoMorphParameters(**recipie)
     except:
-        pars = EchoMorphParameters()
+        # TODO: Deprecated
+        pars = pickle.load(open(directory / 'parameters.bin', 'rb'))
     model = EchoMorph(pars).to(device=device, dtype=dtype)
     model.load_state_dict(torch.load(directory / 'model.bin', map_location=device))
     if verbose:
         print(f'Model parameters: {dict(model.pars.__dict__.items())}')
     return model
 
+
 def save_model(directory, model: EchoMorph):
     os.makedirs(directory, exist_ok=True)
-    pickle.dump(model.pars, open(directory / 'parameters.bin', 'wb'))
+    json.dump(model.pars, open(directory / 'parameters.json', 'w'))
     torch.save(model.state_dict(), directory / 'model.bin')
