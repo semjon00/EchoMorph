@@ -48,7 +48,7 @@ def print_cuda_stats():
 
 class ConsumeProgress:
     def __init__(self, names_and_durations):
-        self.epoch = 0
+        self.epoch = 1
         self.total_epochs = args.total_epochs
         self.paths, self.consumed, self.durations = [], [], []
 
@@ -357,11 +357,15 @@ def loss_function(pred, truth):
     #  * large undershoot = "masked"
     width = pred.size(-1) // 2
 
+    amp_to_phase_significance = 4  # Phase is not as important as amplitude
+
     # This amp code is no more sane than the person who wrote it was when they wrote it
     # Pretty much all the things are eye-balled and not rigorously determined
-    amp_distance = truth[..., :width] - pred[..., :width]
+    truth_amp = truth[..., :width]
+    pred_amp = pred[..., :width]
+    amp_distance = truth_amp - pred_amp
     # Undershoot = bad; overshoot = veeeery baaaad
-    amp_distance = torch.max(amp_distance, 2.0 * (-amp_distance)) * 12
+    amp_distance = torch.max(amp_distance, 2.0 * (-amp_distance))
     # Frequency ranges are not created equal
     amp_distance *= loss_function_freq_significance(width, amp_distance.device)
 
@@ -369,12 +373,13 @@ def loss_function(pred, truth):
     phase_distance = torch.abs(pred[..., width:] - truth[..., width:]) % 2.0
     # Clamp to [0;1], where 1 is the opposite phase
     phase_distance = torch.min(phase_distance, phase_distance * (-1.0) + 2.0)
-    phase_distance *= loss_function_freq_significance(width, amp_distance.device) * 3
-    # Correct phase is not as important as correct amplitude
+    # Phase is more important for more prominent frequencies
+    phase_distance *= (truth_amp + truth_amp.min()) / (0.00001 + truth_amp.max() - truth_amp.min())
+    # Frequency ranges are not created equal
+    phase_distance *= loss_function_freq_significance(width, amp_distance.device)
 
     # We want to minimize distance squared.
-    # Phase is not as important as amplitude
-    loss = torch.mean(torch.cat([amp_distance, phase_distance]) ** 2)
+    loss = torch.mean(torch.cat([amp_distance * amp_to_phase_significance, phase_distance]) ** 2) * 2
     return loss
 
 
