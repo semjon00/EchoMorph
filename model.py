@@ -231,5 +231,5 @@ def load_model(directory, device, dtype, verbose=False):
 
 def save_model(directory, model: EchoMorph):
     os.makedirs(directory, exist_ok=True)
-    json.dump(model.pars, open(directory / 'parameters.json', 'w'))
+    json.dump(model.pars.__dict__, open(directory / 'parameters.json', 'w'))
     torch.save(model.state_dict(), directory / 'model.bin')

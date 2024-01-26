@@ -253,7 +253,9 @@ def take_a_bite(consume: ConsumeProgress):
     try:
         loaded = ac.load_audio(path, frame_offset=start, num_frames=end - start,
                                degrade_keep=random_degradation_value())
-    except:
+    except Exception as e:
+        if e is KeyboardInterrupt:
+            raise e
         print(f"Pain... could not load audio file {str(path)}!")
         return take_a_bite(consume)
     sg = ac.convert_from_wave(loaded)
