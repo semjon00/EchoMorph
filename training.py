@@ -1,6 +1,5 @@
 import builtins
 import datetime
-import json
 import os
 import pathlib
 import time
@@ -17,11 +16,11 @@ from audio import AudioConventer, AUDIO_FORMATS
 
 import argparse
 parser = argparse.ArgumentParser(description='Training routine')
-parser.add_argument('--recipie', type=str, default="")
 parser.add_argument('--total_epochs', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--learning_rate', type=float, default=2e-5)
 parser.add_argument('--save_time', type=int, default=60 * 60)
+parser.add_argument('--baby_parameters', action='store_const', const=True, default=False)
 parser.add_argument('--no_random_degradation', action='store_const', const=True, default=False)
 args = parser.parse_args()
 
@@ -177,6 +176,20 @@ def get_dataset_paths(for_eval=False):
 
 
 def load_progress():
+    if args.baby_parameters:
+        one_sec_len = round(24000 / 84 / 64) * 64
+        overrided_pars = {
+            'target_sample_len': 4 * one_sec_len, 'history_len': one_sec_len // 4, 'fragment_len': one_sec_len // 4,
+            'sc_len': one_sec_len // 4,
+            'spect_width': 256, 'ir_width': 256,
+            'se_blocks': 2,
+            'ae_blocks': (2, 0, 0), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
+            'ad_blocks': (0, 0, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
+            'rm_k_min': 0.9, 'rm_k_max': 1.0, 'mid_repeat_interval': (2, 4)
+        }
+    else:
+        overrided_pars = {}
+
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
     directory = None
@@ -190,11 +203,7 @@ def load_progress():
         model = load_model(directory, device, precision, verbose=True)
         print(f'  Loaded an EchoMorph model.')
     except:
-        if args.recipie == "":
-            print("ERROR! If you do the cooking by the recipie, then you'll have a model.")
-            exit(1)
-        recipie = json.load(open(f'recipies/{args.recipie}.json', 'r'))
-        pars = EchoMorphParameters(**recipie)
+        pars = EchoMorphParameters(**overrided_pars)
         model = EchoMorph(pars).to(device=device, dtype=precision)
         print('  Initialized a new EchoMorph model...')
 
@@ -481,4 +490,4 @@ def training():
 
 if __name__ == '__main__':
     training()
-    # Use like: python training.py --save_time=600 --batch_size=32 --recipie="m_micro_reencoder"
+    # Use like: python training.py --save_time=90 --batch_size=16

@@ -46,7 +46,7 @@ class EchoMorphParameters:
         self.ad_hidden_dim_m = 2
 
         self.drop = 0.01
-        self.rm_k_min = 5 / 8
+        self.rm_k_min = 8 / 8
         self.rm_k_max = 8 / 8
         self.rm_fun = 'exp'
         self.mid_repeat_interval = (2, 5)  # (inclusive, exclusive)
@@ -58,12 +58,11 @@ class EchoMorphParameters:
 class AudioCoder(nn.Module):
     def __init__(self, spect_width, hidden_dim_m, heads, spect_len, drop, blocks_num, cross_n, mid_repeat_interval):
         super().__init__()
-        assert all([x % 2 == 0 for x in blocks_num]), "Criss-crossing won't work"
 
         blocks = []
         for i in range(sum(blocks_num)):
-            ed = spect_width if i % 2 == 0 else spect_len
-            this_cross_n = cross_n if i % 2 == 0 else 0
+            ed = spect_width
+            this_cross_n = cross_n
             blocks += [TransformerBlock(
                 embed_dim=ed,
                 num_heads=heads,
@@ -86,12 +85,12 @@ class AudioCoder(nn.Module):
         if mid_rep is None:
             mid_rep = random.randint(*self.mid_repeat_interval)
         for i, block in enumerate(self.blocks_pre):
-            x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
+            x = block(x, cross)
         for rep in range(mid_rep):
             for i, block in enumerate(self.blocks_mid):
-                x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
+                x = block(x, cross)
         for i, block in enumerate(self.blocks_post):
-            x = torch.transpose(block(x, cross if i % 2 == 0 else []), -1, -2)
+            x = block(x, cross)
         return x
 
 
@@ -216,20 +215,14 @@ class EchoMorph(nn.Module):
 
 
 def load_model(directory, device, dtype, verbose=False):
-    try:
-        recipie = json.load(open(directory / 'parameters.json', 'rb'))
-        pars = EchoMorphParameters(**recipie)
-    except:
-        # TODO: Deprecated
-        pars = pickle.load(open(directory / 'parameters.bin', 'rb'))
+    pars = EchoMorphParameters()
     model = EchoMorph(pars).to(device=device, dtype=dtype)
     model.load_state_dict(torch.load(directory / 'model.bin', map_location=device))
     if verbose:
         print(f'Model parameters: {dict(model.pars.__dict__.items())}')
     return model
 
-
 def save_model(directory, model: EchoMorph):
     os.makedirs(directory, exist_ok=True)
-    json.dump(model.pars.__dict__, open(directory / 'parameters.json', 'w'))
+    pickle.dump(model.pars, open(directory / 'parameters.bin', 'wb'))
     torch.save(model.state_dict(), directory / 'model.bin')
