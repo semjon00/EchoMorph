@@ -149,6 +149,7 @@ def verify_compatibility():
         return
 
     f = 'NONE'
+    verified_files = 0
     try:
         for f in os.listdir(tests_dir):
             if f.endswith('.gitkeep'):
@@ -159,7 +160,7 @@ def verify_compatibility():
         print('Please ensure that ffmpeg (and maybe sox) are installed - these are necessary for reading audio files.')
         print('No training can be done if audio files can not be read.')
         exit(1)
-    print('Compatibility verified.')
+    print(f'Compatibility verified on {verified_files} files from the tests folder.')
 
 
 def get_dataset_paths(for_eval=False):
