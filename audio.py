@@ -6,11 +6,11 @@ AUDIO_FORMATS = ['aac', 'mp3', 'flac', 'wav']
 
 
 class AudioConventer:
-    def __init__(self, target_device, precision=torch.float32, sample_rate=24000, width=256, stretch=3):
+    def __init__(self, target_device, precision=torch.float32, sample_rate=24000, width=128, stretch=3):
         self.sample_rate = sample_rate
-        self.n_fft = width - 2
+        self.n_fft = 2 * width - 2
         self.hop_length = self.n_fft // stretch
-        # For some reason, resampling on GPU is unbeliveably slow,
+        # For some reason, resampling on GPU is unbelievably slow,
         # therefore we actually perform the computations on the CPU and send the result to the needed device.
         self.target_device = target_device
         self.target_dtype = precision
@@ -42,27 +42,24 @@ class AudioConventer:
         return wv.to(self.target_device, self.target_dtype)
 
     def convert_from_wave(self, wv):
-        """
-        Obtains the spectrogram of the provided waveform.
-        Then, re-encodes the spectrogram as a stack
-        of normalized log-amplitudes and phases in interval (from -1 to +1).
-        """
+        """Obtains the spectrogram of the provided waveform."""
         sg = self.transform_to(wv.to(self.target_dtype)).T
         logamp = torch.clamp(torch.abs(sg), min=1e-10, max=1e2).log10()
-        # logamp = (logamp + 10) / 12  # Into [0;1]
-        logamp = (logamp + 4) / 12  # Into [-0.5; 0.5]
-        phase = torch.angle(sg) / torch.pi
-        sg = torch.cat([logamp, phase], dim=1).to(self.target_device, self.target_dtype)
-        return sg
+        logamp = (logamp + 10.000001) / 12  # Into [0;1]
+        x = logamp * torch.cos(torch.angle(sg))
+        y = logamp * torch.sin(torch.angle(sg))
+        sg = torch.cat([y.unsqueeze(-1), x.unsqueeze(-1)], dim=-1)
+        return sg.to(self.target_device, self.target_dtype)
 
-    def convert_to_wave(self, x):
+    def convert_to_wave(self, t):
         """Reverses convert_from_wave, output precision is float32"""
-        split_size = x.size(1) // 2
-        magnitude = x[..., :split_size] * 12 - 4
-        magnitude = torch.clamp((magnitude * self.log10).exp(), max=100.0)
-        phase = x[..., split_size:] * torch.pi
-
-        real_part = magnitude * torch.cos(phase)
+        y = t[..., 0]
+        x = t[..., 1]
+        phase = torch.atan2(y, x)
+        logamp = torch.sqrt(x ** 2 + y ** 2)
+        logamp = logamp * 12 - 10.0
+        magnitude = torch.clamp((logamp * self.log10).exp(), max=1e2)
+        real_part = magnitude * torch.cos(phase)  # Maybe these two are mixed up. Whatever.
         imag_part = magnitude * torch.sin(phase)
         sg = torch.complex(real_part.to(torch.float32), imag_part.to(torch.float32)).T
         wv = self.transform_from(sg)
@@ -73,13 +70,10 @@ class AudioConventer:
     def save_audio(self, wv, path):
         torchaudio.save(path, wv.unsqueeze(0).to('cpu'), self.sample_rate)
 
-    def x_width(self):
-        return (self.n_fft // 2 + 1) * 2
-
 
 if __name__ == '__main__':
     print('Audio conversion test.')
     ac = AudioConventer('cpu')
-    wv = ac.convert_to_wave(ac.convert_from_wave(ac.load_audio('./dataset/tests/example4.mp3', degrade_keep=0.2)))
+    wv = ac.convert_to_wave(ac.convert_from_wave(ac.load_audio('./dataset/tests/example4.mp3', degrade_keep=1.0)))
     ac.save_audio(wv, './dataset/tests/back.wav')
     print('Please test that the audio has no distortions.')

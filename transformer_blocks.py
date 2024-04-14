@@ -3,28 +3,25 @@ import torch.nn as nn
 from torch import Tensor as T
 import einops
 
-class PositionalEmbedding(nn.Module):
-    def __init__(self, seq_len: int, embed_dim: int):
+
+class PlanePositionalEmbedding(nn.Module):
+    def __init__(self, plane_length: int, plane_width: int, embed_dim: int):
         super().__init__()
-        self.pos_embed = nn.Parameter(torch.rand(seq_len, embed_dim) * 0.01)
+        self.row_embed = nn.Parameter(torch.rand(plane_length, 1, embed_dim) * 0.01)
+        self.column_embed = nn.Parameter(torch.rand(1, plane_width, embed_dim) * 0.01)
 
     def forward(self, x: T) -> T:
-        return x + self.pos_embed  # seq_len is *always* constant in our case
+        return x + self.row_embed + self.column_embed
 
 
 class SelfAttention(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, attn_drop: float = 0.1):
+    def __init__(self, embed_dim: int, num_heads: int):
         super().__init__()
         self.num_heads = num_heads
         self.scale = (embed_dim // self.num_heads) ** -0.5
         self.project_qkv = nn.Linear(embed_dim, embed_dim * 3)
         self.softmax = nn.Softmax(dim=-1)
         self.proj_out = nn.Linear(embed_dim, embed_dim)
-        self.attn_drop = nn.Dropout(attn_drop)
-
-    def qkv_partition(self, x):
-        q, k, v = self.project_qkv(x).chunk(3, dim=-1)
-        return q, k, v
 
     def head_partition(self, x: T) -> T:
         return einops.rearrange(x, '... s (h d) -> ... h s d', h=self.num_heads)
@@ -33,13 +30,11 @@ class SelfAttention(nn.Module):
         return einops.rearrange(x, '... h s d -> ... s (h d)')
 
     def forward(self, x: T) -> T:
-        q, k, v = self.qkv_partition(x)
+        q, k, v = self.project_qkv(x).chunk(3, dim=-1)
         q, k, v = map(self.head_partition, (q, k, v))
 
         attn_scores = torch.einsum('...qc,...kc->...qk', q, k) * self.scale
-
         attn_weights = self.softmax(attn_scores)
-        attn_weights = self.attn_drop(attn_weights)
 
         out = torch.einsum('...qv,...vc->...qc', attn_weights, v)
         out = self.head_merging(out)
@@ -47,22 +42,12 @@ class SelfAttention(nn.Module):
         return out
 
 
-class FeedForward(nn.Sequential):
-    def __init__(self, embed_dim: int, hidden_dim: int):
-        super().__init__(
-            nn.Linear(embed_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, embed_dim)
-        )
-
-
 class CrossAttention(nn.Module):
     """Cross attention and also the following normalization layer"""
     def __init__(
             self, 
             embed_dim: int, 
-            num_heads: int, 
-            drop_p: float
+            num_heads: int
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -71,8 +56,6 @@ class CrossAttention(nn.Module):
         self.project_kv = nn.Linear(embed_dim, embed_dim * 2)
         self.softmax = nn.Softmax(dim=-1)
         self.proj_out = nn.Linear(embed_dim, embed_dim)
-        self.attn_drop = nn.Dropout(drop_p)
-        self.drop = nn.Dropout(drop_p)
         self.norm = nn.LayerNorm(embed_dim)
 
     def head_partition(self, x: T) -> T:
@@ -82,23 +65,27 @@ class CrossAttention(nn.Module):
         return einops.rearrange(x, '... h s d -> ... s (h d)')
 
     def forward(self, layer_input: T, cross_attn_input: T) -> T:
-        res = layer_input
-
         q = self.project_q(layer_input)
         k, v = self.project_kv(cross_attn_input).chunk(2, dim=-1)
         q, k, v = map(self.head_partition, (q, k, v))
 
         attn_scores = torch.einsum('...qc,...kc->...qk', q, k) * self.scale
         attn_weights = self.softmax(attn_scores)
-        attn_weights = self.attn_drop(attn_weights)
 
         out = torch.einsum('...qv,...vc->...qc', attn_weights, v)
         out = self.head_merging(out)
         out = self.proj_out(out)
-        out = self.drop(out)
-        out = self.norm(out + res)
 
         return out
+
+
+class MLP(nn.Sequential):
+    def __init__(self, embed_dim: int, hidden_dim: int):
+        super().__init__(
+            nn.Linear(embed_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, embed_dim)
+        )
 
 
 class TransformerBlock(nn.Module):
@@ -106,37 +93,45 @@ class TransformerBlock(nn.Module):
         self,
         embed_dim: int,
         num_heads: int,
-        hidden_dim: int,
+        mlp_hidden_dim: int,
         attn_drop: float,
-        drop: float,
+        mlp_drop: float,
         n_cross_attn_blocks: int = 0
     ):
         super().__init__()
-        self.self_attn = SelfAttention(embed_dim, num_heads, attn_drop)
-        self.self_attn_dropout = nn.Dropout(p=drop)
+        self.self_attn = SelfAttention(embed_dim, num_heads)
+        self.self_attn_dropout = nn.Dropout(p=attn_drop)
         self.self_attn_norm = nn.LayerNorm(embed_dim)
 
         self.cross_attn_blocks = nn.ModuleList([
-            CrossAttention(embed_dim, num_heads, attn_drop)
+            CrossAttention(embed_dim, num_heads)
+            for _ in range(n_cross_attn_blocks)
+        ])
+        # Dropout? Whatever...
+        self.cross_attn_norm = nn.ModuleList([
+            nn.LayerNorm(embed_dim)
             for _ in range(n_cross_attn_blocks)
         ])
 
-        self.ffn = FeedForward(embed_dim, hidden_dim)
-        self.ffn_dropout = nn.Dropout(p=drop)
-        self.ffn_norm = nn.LayerNorm(embed_dim)
+        self.mlp = MLP(embed_dim, mlp_hidden_dim)
+        self.mlp_dropout = nn.Dropout(p=mlp_drop)
+        self.mlp_norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, layer_input: T, cross_attn_inputs: [T] = []) -> T:
-        res = layer_input
-        out = self.self_attn(layer_input)
+    def forward(self, x: T, cross_attn_inputs: [T] = []) -> T:
+        out = self.self_attn_norm(x)
+        out = self.self_attn(out)
         out = self.self_attn_dropout(out)
-        out = self.self_attn_norm(out + res)
+        x = x + out
 
-        for cross_attn_input, cross_attn_block in zip(cross_attn_inputs, self.cross_attn_blocks):
-            out = cross_attn_block(out, cross_attn_input)
+        for i in range(len(self.cross_attn_norm)):
+            out = self.cross_attn_norm[i](x)
+            # Normalize cross inputs?
+            out = self.cross_attn_blocks[i](out, cross_attn_inputs[i])
+            x = x + out
 
-        res = out
-        out = self.ffn(out)
-        out = self.ffn_dropout(out)
-        out = self.ffn_norm(out + res)
+        out = self.mlp_norm(x)
+        out = self.mlp(out)
+        out = self.mlp_dropout(out)
+        x = x + out
 
-        return out
+        return x

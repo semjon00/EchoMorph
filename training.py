@@ -10,6 +10,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import einops
 import sys
+import torchinfo
 
 from model import EchoMorph, EchoMorphParameters, save_model, load_model
 from audio import AudioConventer, AUDIO_FORMATS
@@ -18,9 +19,8 @@ import argparse
 parser = argparse.ArgumentParser(description='Training routine')
 parser.add_argument('--total_epochs', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--learning_rate', type=float, default=2e-5)
+parser.add_argument('--learning_rate', type=float, default=1e-4)
 parser.add_argument('--save_time', type=int, default=60 * 60)
-parser.add_argument('--baby_parameters', action='store_const', const=True, default=False)
 parser.add_argument('--no_random_degradation', action='store_const', const=True, default=False)
 args = parser.parse_args()
 
@@ -41,9 +41,10 @@ def print_cuda_stats():
         return
     try:
         vals = torch.cuda.mem_get_info()
-        print(f'Cuda memory availability: {str(vals)}')
+        print(f'Cuda memory | free:{str(vals[0])} total:{str(vals[1])}')
     except:
         print('Failed to display cuda memory availability.')
+
 
 class ConsumeProgress:
     def __init__(self, names_and_durations):
@@ -154,6 +155,7 @@ def verify_compatibility():
             if f.endswith('.gitkeep'):
                 continue
             ac.convert_to_wave(ac.convert_from_wave(ac.load_audio(tests_dir / f)))
+            verified_files += 1
     except:
         print(f'Compatibility check FAILED on file {f}')
         print('Please ensure that ffmpeg (and maybe sox) are installed - these are necessary for reading audio files.')
@@ -176,20 +178,6 @@ def get_dataset_paths(for_eval=False):
 
 
 def load_progress():
-    if args.baby_parameters:
-        one_sec_len = round(24000 / 84 / 64) * 64
-        overrided_pars = {
-            'target_sample_len': 4 * one_sec_len, 'history_len': one_sec_len // 4, 'fragment_len': one_sec_len // 4,
-            'sc_len': one_sec_len // 4,
-            'spect_width': 256, 'ir_width': 256,
-            'se_blocks': 2,
-            'ae_blocks': (2, 0, 0), 'ae_heads': 4, 'ae_hidden_dim_m': 1,
-            'ad_blocks': (0, 0, 2), 'ad_heads': 4, 'ad_hidden_dim_m': 1,
-            'rm_k_min': 0.9, 'rm_k_max': 1.0, 'mid_repeat_interval': (2, 4)
-        }
-    else:
-        overrided_pars = {}
-
     p_snapshots = pathlib.Path("snapshots")
     os.makedirs(p_snapshots, exist_ok=True)
     directory = None
@@ -203,9 +191,10 @@ def load_progress():
         model = load_model(directory, device, precision, verbose=True)
         print(f'  Loaded an EchoMorph model.')
     except:
-        pars = EchoMorphParameters(**overrided_pars)
+        pars = EchoMorphParameters()
         model = EchoMorph(pars).to(device=device, dtype=precision)
         print('  Initialized a new EchoMorph model...')
+    torchinfo.summary(model, ((256, 128, 2), (32, 64, 128, 2)))
 
     try:
         consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
@@ -242,16 +231,14 @@ def save_progress(model, consume, training_params):
     print('Saved progress.')
 
 
-def random_degradation_value():
-    if args.no_random_degradation:
-        return 1.000001
-    # Eyeballed
-    r = random.random()
-    return min((r ** 1.5) + 0.2, 1.000001)
-
-
 def take_a_bite(consume: ConsumeProgress):
     """Randomly selects a file from dataset and takes a bite."""
+    def random_degradation_value():
+        # Augmentation
+        if args.no_random_degradation:
+            return 1.000001
+        return min((random.random() ** 1.5) + 0.2, 1.000001)  # Eyeballed
+
     sel = consume.lottery_idx()
     if sel is None:
         return None, None
@@ -279,7 +266,7 @@ class CustomAudioDataset(Dataset):
         chunks_n = train_spect.size(0) // fl
         train_spect = train_spect[:chunks_n * fl, :]
 
-        chunks = einops.rearrange(train_spect, '(s x) w -> s x w', x=fl)
+        chunks = einops.rearrange(train_spect, '(s x) ... -> s x ...', x=fl)
         fragments_i = torch.arange(hl // fl, chunks.size(0))
         self.fragments = chunks[fragments_i, ...]
         history_i = torch.arange(0, chunks.size(0) - hl // fl).view(-1, 1) + torch.arange(hl // fl)
@@ -313,18 +300,20 @@ class LossNaNException(Exception):
 def eval_model(model, eval_datasets):
     total_loss = 0.0
     total_items = 0
-    with torch.no_grad():
+    with torch.inference_mode():
         model.eval()
-        m_def_reps = model.pars.mid_repeat_interval
-        for middle_repeats in range(m_def_reps[0], m_def_reps[1], max(1, (m_def_reps[1] - m_def_reps[1]) // 4)):
-            for target_sample, dataloader in eval_datasets:
-                for history, fragments in iter(dataloader):
-                    pred = model(target_sample, history, fragments, middle_repeats=middle_repeats)
-                    loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision)
-                    if loss.isnan():
-                        raise LossNaNException()
-                    total_loss += loss.item()
-                total_items += len(dataloader)
+        r = random.Random(42)
+        model.bottleneck.deterministic(42)
+        for target_sample, dataloader in eval_datasets:
+            for history, fragments in iter(dataloader):
+                rep = r.randint(*model.pars.mid_repeat_interval)
+                pred = model(target_sample, fragments, middle_repeats=rep)
+                loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision)
+                if loss.isnan():
+                    raise LossNaNException()
+                total_loss += loss.item()
+            total_items += len(dataloader)
+        model.bottleneck.deterministic(None)
     if total_items == 0:
         return None
     return total_loss / total_items
@@ -345,59 +334,20 @@ def loss_function_freq_significance(width, device):
 
 def loss_function(pred, truth):
     """Custom loss function, for comparing two spectrograms. Not the best one, but it should work."""
-    # TODO: this can be infinitely improved:
+    # TODO:
     #  * equal-loudness contour
     #  * auditory masking
-    #  * jitter in neighbor values across time-domain
+    #  * phase jitter in neighbor values across time-domain
     #  * slightly different pitch is not too bad
     #  * large undershoot = "masked"
-    width = pred.size(-1) // 2
-
-    amp_to_phase_significance = 4.0  # Phase is not as important as amplitude
-    diff_to_val_significance = 0.8
-
-    # This amp code is no more sane than the person who wrote it was when they wrote it
-    # Pretty much all the things are eye-balled and not rigorously determined
-    truth_amp = truth[..., :width]
-    pred_amp = pred[..., :width]
-    amp_distance = truth_amp - pred_amp
-    amp_jitter = torch.clamp(torch.abs(amp_distance[..., 1:, :] - amp_distance[..., :-1, :]) -
-                             torch.abs(truth_amp[..., 1:, :] - truth_amp[..., :-1, :]), min=0.0)
-    # Undershoot = bad; overshoot = veeeery baaaad
-    amp_distance = torch.max(amp_distance, 2.0 * (-amp_distance))
-    # Jitter (overshooting and then immediately undershooting) is very bad
-    amp_distance[..., 1:, :] += amp_jitter * diff_to_val_significance
-    # Frequency ranges are not created equal
-    amp_distance *= loss_function_freq_significance(width, amp_distance.device)
-
-    # Phase is also important
-    def phase_diff(vals1, vals2):
-        # Phase part of the spectrogram works like a circle.
-        vals = torch.abs(vals1 - vals2) % 2.0
-        # Clamp to [0;1], where 1 is the opposite phase
-        return torch.min(vals, vals * (-1.0) + 2.0)
-    truth_phase = truth[..., width:]
-    pred_phase = pred[..., width:]
-
-    phase_distance = phase_diff(truth_phase, pred_phase)
-    # Add phase jitter
-    phase_jitter = torch.clamp(phase_diff(pred_phase[..., 1:, :], pred_phase[..., :-1, :]) -
-                               phase_diff(truth_phase[..., 1:, :], truth_phase[..., :-1, :]), min=0.0)
-    phase_distance[..., 1:, :] += phase_jitter * diff_to_val_significance
-    # Phase is more important for more prominent frequencies
-    phase_distance *= (truth_amp + truth_amp.min()) / torch.clamp(truth_amp.max() - truth_amp.min(), min=0.01)
-    # Frequency ranges are not created equal
-    phase_distance *= loss_function_freq_significance(width, amp_distance.device)
-
-    # We want to minimize distance squared.
-    loss = torch.mean(torch.cat([amp_distance * amp_to_phase_significance, phase_distance]) ** 2) * 2
-    return loss
+    #  Honestly, just read a couple of good papers
+    return torch.nn.functional.mse_loss(pred, truth)
 
 
 def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
     """Train the model on the prettified spectrogram."""
     tsl = model.pars.target_sample_len
-    target_sample = train_spect[0:tsl, :]
+    target_sample = train_spect[0:tsl, :]  # TODO: this is not good
 
     hl = model.pars.history_len
     fl = model.pars.fragment_len
@@ -412,7 +362,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
     model.train()
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
-        pred = model(target_sample, history, fragments)
+        pred = model(target_sample, fragments)
         loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision)
         if loss.isnan():
             raise LossNaNException()
@@ -437,10 +387,10 @@ def training():
     optimizer = torch.optim.Adam([
         {'params': model.get_base_parameters(),
          'lr': lr},
-        {'params': model.get_multiplicating_parameters(),
+        {'params': model.get_multiplication_parameters(),
          'lr': (lr / (sum(model.pars.mid_repeat_interval) - 1))}
     ])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=15, min_lr=1e-8,
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=30, min_lr=1e-8,
                                                            threshold=0.001, threshold_mode='rel')
     print_cuda_stats()
     print(f'Training initiated!')

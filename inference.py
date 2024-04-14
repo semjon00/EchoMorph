@@ -20,8 +20,11 @@ def play_audio(filename):
         pygame.mixer.init(frequency=44100)
         pygame.mixer.music.load(filename)
         pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.01)
+        try:
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.01)
+        except:
+            pass  # Somebody's ears bled
         pygame.mixer.music.unload()
     else:
         print('Playback not implemented...')
@@ -64,7 +67,7 @@ class InferenceFreestyle:
     def load(self, path):
         """Loads an object - sound or characteristic."""
         if not pathlib.Path(path).is_file():
-            for cand in ['demo', 'dataset\\tests', 'dataset/tests']:
+            for cand in ['demo', pathlib.Path('dataset') / 'tests']:
                 if (pathlib.Path(cand) / path).is_file():
                     path = pathlib.Path(cand) / path
                     break
@@ -79,17 +82,23 @@ class InferenceFreestyle:
         else:
             raise NotImplementedError()
 
-    def save(self, name, path):
+    def save(self, name, filename):
         """Saves an object - sound or characteristic."""
+        if filename == '':
+            filename = name
         if name[0].startswith('s'):
-            if path.split('.')[-1] not in AUDIO_FORMATS:
-                path += '.wav'
+            if filename.split('.')[-1] not in AUDIO_FORMATS:
+                filename += '.wav'
             audio = self.ac.convert_to_wave(self.bank[name][0])
-            self.ac.save_audio(audio, path)
+            if not any([x in filename for x in '/\\']):
+                filename = 'demo/' + filename
+            self.ac.save_audio(audio, filename)
         elif name[0].startswith('c'):
-            if path.split('.')[-1] not in ['emc']:
-                path += '.emc'
-            torch.save(self.bank[name][0], path)
+            if filename.split('.')[-1] not in ['emc']:
+                filename += '.emc'
+            if not any([x in filename for x in '/\\']):
+                filename = 'demo/' + filename
+            torch.save(self.bank[name][0], pathlib.Path('demo') / filename)
         else:
             raise NotImplementedError()
 
@@ -121,7 +130,7 @@ class InferenceFreestyle:
     def derive_sc(self, name, repeats=1):
         """Derives speaker characteristic from waveform. Can derive multiple and average them out."""
         assert repeats > 0
-        with torch.no_grad():
+        with torch.inference_mode():
             tsl = self.model.pars.target_sample_len
             sg = self.bank[name][0]
 
@@ -152,8 +161,10 @@ class InferenceFreestyle:
             recipie = f'Merged from {name1} ({(1.0 - proportion):.3f}) and {name2} ({proportion:.3f})'
         else:
             recipie = f'Overcharged from {name2} (+{proportion:.3f}) by ' \
-                      f'un-tainting {name2} ({(1.0 - proportion):.3f}) from it'
+                      f'un-tainting {name1} ({(1.0 - proportion):.3f}) from it'
         self.to_bank('c', obj, recipie)
+
+    # TODO: king queen man woman
 
     def randomize_sc(self, name, p):
         obj = self.bank[name][0]
@@ -162,13 +173,13 @@ class InferenceFreestyle:
         torch.clamp(obj, min=o_min, max=o_max)
         self.to_bank('c', obj, f'Forged from {name} by applying {p:.3f} grams of pure chaos')
 
-    def infer(self, sc_name, source_name, tradeoff: float = 0.5, quality: int = 10, radiation: float = 0):
+    def infer(self, sc_name, source_name, tradeoff: float = 0.95, quality: int = 4, radiation: float = 0):
         # TODO: multi-merge (averaging multiple infer-s with slightly different windowing)
         # Updating model settings
         assert 0 <= quality
         for mp in [self.model.audio_encoder, self.model.audio_decoder]:
             mp.set_mid_repeat_interval(quality)
-        self.model.rando_mask.set_p(tradeoff)
+        self.model.bottleneck.set_p(tradeoff)
 
         do_lerp = '->' in sc_name
         if do_lerp:
@@ -179,9 +190,9 @@ class InferenceFreestyle:
 
         hl = self.model.pars.history_len
         fl = self.model.pars.fragment_len
-        source = torch.nn.functional.pad(source, (0, 0, hl, fl))
+        source = torch.nn.functional.pad(source, (0, 0, 0, 0, hl, fl))
         target = torch.zeros_like(source)
-        with torch.no_grad():
+        with torch.inference_mode():
             print('Inferencing: [', end='')
             for cur in range(hl, target.size(0) - fl, fl):
                 if do_lerp:
@@ -190,14 +201,14 @@ class InferenceFreestyle:
                 else:
                     cur_sc = sc
                 intermediate = self.model.audio_encoder(
-                    source[cur:cur + fl, :].unsqueeze(0), source[cur - hl:cur, :].unsqueeze(0)
+                    source[cur:cur + fl, :].unsqueeze(0)
                 )
                 if radiation > 1e-9:
                     intermediate += torch.where(intermediate == 0, torch.tensor(0),
                                                 torch.randn_like(intermediate) * radiation)
-                intermediate = self.model.rando_mask(intermediate)
+                intermediate = self.model.bottleneck(intermediate)
                 target[cur:cur + fl, :] = self.model.audio_decoder(
-                    intermediate, cur_sc, target[cur - hl:cur, :].unsqueeze(0)
+                    intermediate, cur_sc
                 )
                 print('.', end='')
             print('] Done!')
@@ -223,8 +234,8 @@ def demo(freestyle: InferenceFreestyle):
     src = input('Speech file path: ')
     if len(src) < 1:
         src = './dataset/tests/example1.mp3'
-        tgt_s = './dataset/tests/example2.mp3'
-        save = './dataset/result_temp.wav'
+        tgt_s = './dataset/tests/example1.mp3'
+        save = './demo/result_temp.wav'
     else:
         tgt_s = input('Speaker file path: ')
         save = input('Save into: ')
@@ -233,8 +244,8 @@ def demo(freestyle: InferenceFreestyle):
     sc = freestyle.derive_sc(tgt_s_n)
     src = freestyle.load(src)
     out = freestyle.infer(sc, src)
-    freestyle.play_sample(out)
     freestyle.save(out, save)
+    freestyle.play_sample(out)
 
 
 if __name__ == '__main__':
