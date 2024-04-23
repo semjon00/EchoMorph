@@ -15,8 +15,6 @@ from transformer_blocks import TransformerBlock, PlanePositionalEmbedding
 
 # TODO: Explore better compression methods
 
-# TODO: VAE for speaker encoder
-
 
 class EchoMorphParameters:
     """Training parameters"""
@@ -93,7 +91,7 @@ class AudioCoder(nn.Module):
         return x
 
 
-class SpeakerEncoder(AudioCoder):
+class SpeakerVAE(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.se_hidden_dim_m, heads=pars.se_heads,
                          drop=pars.drop, blocks_num=pars.se_blocks, cross_n=0, mid_repeat_interval=(0, 1))
@@ -103,15 +101,33 @@ class SpeakerEncoder(AudioCoder):
             pars.target_sample_len // self.patch_len, pars.spect_width, pars.embed_dim
         )
         self.out_tokens = pars.se_output_tokens
+        self.mean_linear = nn.Linear(pars.embed_dim, pars.embed_dim)
+        self.log_var_linear = nn.Linear(pars.embed_dim, pars.embed_dim)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward_shared(self, x: Tensor) -> (Tensor, Tensor):
         # This should do: tokenization, pos embed, coding
         x = einops.rearrange(x, '... (l ld) w c -> ... l w (c ld)', ld=self.patch_len)
         x = self.entok(x)
         x = self.pos_embed(x)
         x = einops.rearrange(x, '... l w d -> ... (l w) d')
         x = super().forward(x, [])
-        return x[..., :self.out_tokens, :]
+
+        means = self.mean_linear(x[..., :self.out_tokens, :])
+        return means, x[..., self.out_tokens:2 * self.out_tokens, :]
+
+    def forward_train(self, x):
+        means, log_vars_t = self.forward_shared(x)
+        log_vars = self.log_var_linear(log_vars_t)
+        kl_loss = torch.mean(0.5 * torch.sum(torch.exp(log_vars) + means ** 2 - log_vars - 1, dim=-1))
+
+        epsilon = torch.randn_like(means)
+        std = torch.exp(0.5 * log_vars)
+        z = std * epsilon + means
+        return z, kl_loss
+
+    def forward_use(self, x):
+        means, log_vars_t = self.forward_shared(x)
+        return means
 
 
 class AudioEncoder(AudioCoder):
@@ -158,7 +174,7 @@ class EchoMorph(nn.Module):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__()
         self.pars = pars
-        self.speaker_encoder = SpeakerEncoder(pars)
+        self.speaker_encoder = SpeakerVAE(pars)
         self.audio_encoder = AudioEncoder(pars)
         self.bottleneck = PriorityNoise(
             pars.rm_k_min, pars.rm_k_max, pars.rm_fun, pars.embed_dim
@@ -167,11 +183,12 @@ class EchoMorph(nn.Module):
 
     def forward(self, target_sample, source_fragment, middle_repeats=None):
         """Used for training, use inference.py for inference"""
-        speaker_characteristic = self.speaker_encoder(target_sample)
+        speaker_characteristic, se_loss = self.speaker_encoder.forward_train(target_sample)
         intermediate = self.audio_encoder(source_fragment, middle_repeats)
         intermediate = self.bottleneck(intermediate)
         output = self.audio_decoder(intermediate, speaker_characteristic, middle_repeats)
-        return output
+        extra_loss = 0.003 * se_loss
+        return output, extra_loss
 
     def get_multiplication_parameters(self):
         return chain.from_iterable([

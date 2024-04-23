@@ -307,8 +307,8 @@ def eval_model(model, eval_datasets):
         for target_sample, dataloader in eval_datasets:
             for history, fragments in iter(dataloader):
                 rep = r.randint(*model.pars.mid_repeat_interval)
-                pred = model(target_sample, fragments, middle_repeats=rep)
-                loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision)
+                pred, extra_loss = model(target_sample, fragments, middle_repeats=rep)
+                loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
                 if loss.isnan():
                     raise LossNaNException()
                 total_loss += loss.item()
@@ -362,8 +362,8 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
     model.train()
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
-        pred = model(target_sample, fragments)
-        loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision)
+        pred, extra_loss = model(target_sample, fragments)
+        loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
         if loss.isnan():
             raise LossNaNException()
         loss.backward()

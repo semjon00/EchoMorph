@@ -139,14 +139,14 @@ class InferenceFreestyle:
                 sg = torch.cat((padding, sg, padding), dim=0)
 
             print('Deriving: [', end='')
-            out = self.model.speaker_encoder(sg[0:0+tsl, :])
+            out = self.model.speaker_encoder.forward_use(sg[0:0+tsl, :])
             print('.', end='')
             start_end = sg.size(0) - tsl
             start = 0
             for i in range(1, repeats):
                 # Deterministic, but uniform-like distribution of starting points
                 start = (start + 2147483647) % start_end
-                out += self.model.speaker_encoder(sg[start:start+tsl, :])
+                out += self.model.speaker_encoder.forward_use(sg[start:start+tsl, :])
                 print('.', end='')
             print('] Done!')
             out /= repeats
