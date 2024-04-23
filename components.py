@@ -48,6 +48,7 @@ class RandoMask(RandMachine):
 class PriorityNoise(RandMachine):
     def __init__(self, k_min, k_max, fun, embed_dim):
         super().__init__(k_min, k_max, fun)
+        assert fun == 'lin', 'PriorityNoise only supports lin mode'
         self.embed_dim = embed_dim
         self.importance = nn.Sequential(
             nn.Linear(embed_dim, 1),
@@ -60,12 +61,15 @@ class PriorityNoise(RandMachine):
     def forward(self, x: Tensor):
         val = super().get_val()
         val = val * (self.k_max - self.k_min) + self.k_min
-        if self.fun == 'exp':
-            val = (10 ** val - 1) / (10 - 1)
 
-        noise_levels = -self.importance(x)
-        noise_levels = noise_levels - noise_levels.mean(dim=-1).unsqueeze(-1)
-        noise_levels = (torch.e ** noise_levels) * (1 - val)
+        # Make quality levels strictly conform to the budget constraint
+        unadjusted_quality = self.importance(x)
+        p = unadjusted_quality.mean(dim=-1)
+        s = torch.min((1 - val) / (1 - p), val / p)
+        k = torch.max(torch.zeros_like(p), (val - p) / (1 - p))
+        quality = k.unsqueeze(-1) + s.unsqueeze(-1) * unadjusted_quality
+
+        noise_levels = -torch.log(quality)  # eps not needed sigmoid (as we scale it above) never touches 0 or 1
         noise_levels = einops.repeat(noise_levels, '... -> ... a', a=self.embed_dim)
         noise = torch.randn_like(noise_levels)
 
