@@ -14,32 +14,33 @@ from transformer_blocks import TransformerBlock, PlanePositionalEmbedding
 # TODO: Use intermediate representation for autoregressive feeding of history.
 
 # TODO: Explore better compression methods
-
+# TODO: Refactor training parameters into a separate class (don't forget kl_loss!)
+# TODO: Sub-quadratic speaker encoder
 
 class EchoMorphParameters:
     """Training parameters"""
     def __init__(self, **kwargs):
         """By default, contains large model specs"""
         one_sec_len = round(24000 / 84 / 64) * 64  # sample_rate / hop_length; approximately
-        self.target_sample_len = 1 * one_sec_len
-        self.history_len = one_sec_len // 2
-        self.fragment_len = one_sec_len // 4
+        self.target_sample_len = one_sec_len // 4
+        self.history_len = one_sec_len // 4
+        self.fragment_len = one_sec_len // 8
 
         self.spect_width = 128  # x_width
         self.length_of_patch = 8
 
         self.embed_dim = 64
 
-        self.se_blocks = (4, 0, 0)
+        self.se_blocks = (1, 2, 1)
         self.se_heads = 8
         self.se_hidden_dim_m = 3
         self.se_output_tokens = 256
 
-        self.ae_blocks = (4, 0, 0)
+        self.ae_blocks = (1, 2, 1)
         self.ae_heads = 4
         self.ae_hidden_dim_m = 2
 
-        self.ad_blocks = (0, 0, 4)
+        self.ad_blocks = (3, 2, 1)
         self.ad_heads = 8
         self.ad_hidden_dim_m = 2
 
@@ -203,6 +204,9 @@ class EchoMorph(nn.Module):
 
 
 def load_model(directory, device, dtype, verbose=False):
+    fp = directory / 'model.bin'
+    if not fp.is_file():
+        raise FileNotFoundError('Model not found.')
     pars = EchoMorphParameters()
     model = EchoMorph(pars).to(device=device, dtype=dtype)
     model.load_state_dict(torch.load(directory / 'model.bin', map_location=device))

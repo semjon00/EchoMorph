@@ -16,9 +16,10 @@ from model import EchoMorph, EchoMorphParameters, save_model, load_model
 from audio import AudioConventer, AUDIO_FORMATS
 
 import argparse
+
 parser = argparse.ArgumentParser(description='Training routine')
 parser.add_argument('--total_epochs', type=int, default=1)
-parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--batch_size', type=int, default=16)
 parser.add_argument('--learning_rate', type=float, default=1e-4)
 parser.add_argument('--save_time', type=int, default=60 * 60)
 parser.add_argument('--no_random_degradation', action='store_const', const=True, default=False)
@@ -84,7 +85,6 @@ class ConsumeProgress:
             self.durations = [ele for idx, ele in enumerate(self.durations) if idx not in remd]
             print(f'Removed {len(remd)} files from the dataset')
 
-
     def lottery_idx(self):
         if self.total_consumed == self.total_durations:
             if self.epoch_rollover():
@@ -133,7 +133,7 @@ def report(optimizer, consume, avg_loss, avg_loss_origin: pathlib.Path):
     current_lr = optimizer.param_groups[0]['lr']
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
     avg_loss = "\u221E" if avg_loss is None else f'{avg_loss:03.5f}'
-    print(f'Report | {percent_consumed:02.3f}% | lr {1e6*current_lr:03.3f}q | {avg_loss} loss on "{fn_string}"')
+    print(f'Report | {percent_consumed:02.3f}% | lr {1e6 * current_lr:03.3f}q | {avg_loss} loss on "{fn_string}"')
 
 
 def upd_timings(timings, name, start_time):
@@ -194,7 +194,8 @@ def load_progress():
         pars = EchoMorphParameters()
         model = EchoMorph(pars).to(device=device, dtype=precision)
         print('  Initialized a new EchoMorph model...')
-    torchinfo.summary(model, ((256, 128, 2), (32, 64, 128, 2)))
+    torchinfo.summary(model, ((args.batch_size, model.pars.history_len, model.pars.spect_width, 2),
+                              (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 2)))
 
     try:
         consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
@@ -233,6 +234,7 @@ def save_progress(model, consume, training_params):
 
 def take_a_bite(consume: ConsumeProgress):
     """Randomly selects a file from dataset and takes a bite."""
+
     def random_degradation_value():
         # Augmentation
         if args.no_random_degradation:
@@ -260,7 +262,8 @@ def take_a_bite(consume: ConsumeProgress):
 
 
 class CustomAudioDataset(Dataset):
-    """Provides history and fragments from given spectrogram, in an alligned way."""
+    """Provides history and fragments from given spectrogram, in an aligned way."""
+
     def __init__(self, train_spect, hl, fl):
         assert hl % fl == 0, 'Not implemented'
         chunks_n = train_spect.size(0) // fl
@@ -270,7 +273,7 @@ class CustomAudioDataset(Dataset):
         fragments_i = torch.arange(hl // fl, chunks.size(0))
         self.fragments = chunks[fragments_i, ...]
         history_i = torch.arange(0, chunks.size(0) - hl // fl).view(-1, 1) + torch.arange(hl // fl)
-        self.history = einops.rearrange(chunks[history_i, ...], '... x s w -> ... (x s) w')
+        self.history = einops.rearrange(chunks[history_i, ...], '... x s w c-> ... (x s) w c')
 
     def __len__(self):
         return len(self.fragments)
@@ -289,7 +292,7 @@ def create_eval_datasets(model_pars: EchoMorphParameters):
         loaded = ac.load_audio(dfile)
         eval_spect = ac.convert_from_wave(loaded)
         eval_datasets += [(eval_spect[:tsl, ...], DataLoader(CustomAudioDataset(eval_spect[tsl:, ...], hl=hl, fl=fl),
-                                                            batch_size=args.batch_size, shuffle=False))]
+                                                             batch_size=args.batch_size, shuffle=False))]
     return eval_datasets
 
 
@@ -320,6 +323,8 @@ def eval_model(model, eval_datasets):
 
 
 loss_function_freq_significance_cache = None
+
+
 def loss_function_freq_significance(width, device):
     global loss_function_freq_significance_cache
     if loss_function_freq_significance_cache is None or loss_function_freq_significance_cache[0] != width:
@@ -347,7 +352,7 @@ def loss_function(pred, truth):
 def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
     """Train the model on the prettified spectrogram."""
     tsl = model.pars.target_sample_len
-    target_sample = train_spect[0:tsl, :]  # TODO: this is not good
+    target_sample = train_spect[0:tsl, :]
 
     hl = model.pars.history_len
     fl = model.pars.fragment_len
@@ -362,7 +367,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
     model.train()
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
-        pred, extra_loss = model(target_sample, fragments)
+        pred, extra_loss = model(history, fragments)
         loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
         if loss.isnan():
             raise LossNaNException()
@@ -425,7 +430,7 @@ def training():
                 save_progress(model, consume, [optimizer.param_groups[0]['lr']])
                 print(f'Timings: {timings}')
             bite_i += 1
-            if bite_i == 1:
+            if bite_i == 1 or bite_i % 100 == 0:
                 print_cuda_stats()
     except KeyboardInterrupt:
         print('Exiting gracefully...')
