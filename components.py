@@ -41,7 +41,10 @@ class RandoMask(RandMachine):
     def forward(self, x: Tensor):
         els = x.shape[-2]
         pels = els * super().get_val() if self.fun == 'lin' else els ** super().get_val()
-        x[..., round(pels):, :] = 0  # Masking rightmost columns, leaving pels leftmost columns intact
+        # Masking rightmost columns, leaving pels leftmost columns intact
+        # Making masked tokens different, maybe the model could learn to use then for something useful.
+        rr = torch.randn_like(x[..., round(pels):, :]) * 0.01
+        x[..., round(pels):, :] = rr
         return x
 
 

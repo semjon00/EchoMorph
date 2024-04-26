@@ -207,6 +207,7 @@ def load_progress():
     new_dpaths = [x for x in get_dataset_paths() if x not in consume.paths]
     consume.add_files([[x, ac.total_frames(x)] for x in new_dpaths])
     print(f'and {len(consume.paths)} files after refresh... ')
+    print(f'  Total frames: {consume.total_durations}')
 
     try:
         training_params = pickle.load(open(directory / 'training_params.bin', 'rb'))
@@ -301,6 +302,7 @@ class LossNaNException(Exception):
 
 
 def eval_model(model, eval_datasets):
+    # TODO: this is not deterministic - randomness of VAE, randomness of noise
     total_loss = 0.0
     total_items = 0
     with torch.inference_mode():

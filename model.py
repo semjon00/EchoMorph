@@ -14,6 +14,8 @@ from transformer_blocks import TransformerBlock, PlanePositionalEmbedding
 # TODO: Use intermediate representation for autoregressive feeding of history.
 
 # TODO: Explore better compression methods
+# TODO: Conv encoders
+
 # TODO: Refactor training parameters into a separate class (don't forget kl_loss!)
 # TODO: Sub-quadratic speaker encoder
 
@@ -155,15 +157,15 @@ class AudioEncoder(AudioCoder):
 class AudioDecoder(AudioCoder):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.ad_hidden_dim_m, heads=pars.ad_hidden_dim_m,
-                         drop=pars.drop, blocks_num=pars.ad_blocks, cross_n=1,
+                         drop=pars.drop, blocks_num=pars.ad_blocks, cross_n=2,
                          mid_repeat_interval=pars.mid_repeat_interval)
         self.detok = nn.Linear(pars.embed_dim, 2 * pars.length_of_patch)
         self.spect_width = pars.spect_width
         self.length_of_patch = pars.length_of_patch
 
-    def forward(self, x: Tensor, speaker_characteristic: Tensor, mid_rep=None) -> Tensor:
+    def forward(self, im: Tensor, sc: Tensor, mid_rep=None) -> Tensor:
         # This should do: coding, de-tokenization
-        x = super().forward(x, [speaker_characteristic], mid_rep=mid_rep)
+        x = super().forward(im, [im, sc], mid_rep=mid_rep)
 
         x = einops.rearrange(x, '... (l w) d -> ... l w d', w=self.spect_width)
         x = self.detok(x)
