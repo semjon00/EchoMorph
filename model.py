@@ -1,14 +1,12 @@
 from itertools import chain
-import numpy as np
 import torch
 from torch import Tensor, nn
 import einops
-import random
 import pickle
 import os
 
 from components import PriorityNoise
-from transformer_blocks import TransformerBlock, PlanePositionalEmbedding
+from transformer_blocks import PlanePositionalEmbedding, Transformer
 
 # TODO: Re-introduce the history
 # TODO: Use intermediate representation for autoregressive feeding of history.
@@ -18,6 +16,7 @@ from transformer_blocks import TransformerBlock, PlanePositionalEmbedding
 
 # TODO: Refactor training parameters into a separate class (don't forget kl_loss!)
 # TODO: Sub-quadratic speaker encoder
+
 
 class EchoMorphParameters:
     """Training parameters"""
@@ -33,16 +32,16 @@ class EchoMorphParameters:
 
         self.embed_dim = 64
 
-        self.se_blocks = (1, 2, 1)
+        self.se_blocks = (6, 0, 0)
         self.se_heads = 8
         self.se_hidden_dim_m = 3
         self.se_output_tokens = 256
 
-        self.ae_blocks = (1, 2, 1)
+        self.ae_blocks = (6, 0, 0)
         self.ae_heads = 4
         self.ae_hidden_dim_m = 2
 
-        self.ad_blocks = (3, 2, 1)
+        self.ad_blocks = (6, 0, 0)
         self.ad_heads = 8
         self.ad_hidden_dim_m = 2
 
@@ -56,45 +55,7 @@ class EchoMorphParameters:
             setattr(self, key, value)
 
 
-class AudioCoder(nn.Module):
-    def __init__(self, embed_dim, mlp_hidden_dim, heads, drop, blocks_num, cross_n, mid_repeat_interval):
-        super().__init__()
-
-        blocks = []
-        for i in range(sum(blocks_num)):
-            this_cross_n = cross_n
-            blocks += [TransformerBlock(
-                embed_dim=embed_dim,
-                num_heads=heads,
-                mlp_hidden_dim=mlp_hidden_dim,
-                attn_drop=drop,
-                mlp_drop=drop,
-                n_cross_attn_blocks=this_cross_n
-            )]
-        self.blocks_pre = nn.ModuleList(blocks[:blocks_num[0]])
-        self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[0]+blocks_num[1]])
-        self.blocks_post = nn.ModuleList(blocks[blocks_num[0]+blocks_num[1]:])
-        self.mid_repeat_interval = mid_repeat_interval
-
-        self.dropout = nn.Dropout(drop)
-
-    def set_mid_repeat_interval(self, new_val):
-        self.mid_repeat_interval = (new_val, new_val + 1)
-
-    def forward(self, x: Tensor, cross: list[Tensor], mid_rep=None):
-        if mid_rep is None:  # TODO: this must always be passed from above
-            mid_rep = random.randint(*self.mid_repeat_interval)
-        for i, block in enumerate(self.blocks_pre):
-            x = block(x, cross)
-        for rep in range(mid_rep):
-            for i, block in enumerate(self.blocks_mid):
-                x = block(x, cross)
-        for i, block in enumerate(self.blocks_post):
-            x = block(x, cross)
-        return x
-
-
-class SpeakerVAE(AudioCoder):
+class SpeakerVAE(Transformer):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.se_hidden_dim_m, heads=pars.se_heads,
                          drop=pars.drop, blocks_num=pars.se_blocks, cross_n=0, mid_repeat_interval=(0, 1))
@@ -133,7 +94,7 @@ class SpeakerVAE(AudioCoder):
         return means
 
 
-class AudioEncoder(AudioCoder):
+class AudioEncoder(Transformer):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.ae_hidden_dim_m, heads=pars.ae_heads,
                          drop=pars.drop, blocks_num=pars.ae_blocks, cross_n=0,
@@ -154,7 +115,7 @@ class AudioEncoder(AudioCoder):
         return x
 
 
-class AudioDecoder(AudioCoder):
+class AudioDecoder(Transformer):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.ad_hidden_dim_m, heads=pars.ad_hidden_dim_m,
                          drop=pars.drop, blocks_num=pars.ad_blocks, cross_n=2,
@@ -187,7 +148,7 @@ class EchoMorph(nn.Module):
     def forward(self, target_sample, source_fragment, middle_repeats=None):
         """Used for training, use inference.py for inference"""
         speaker_characteristic, se_loss = self.speaker_encoder.forward_train(target_sample)
-        intermediate = self.audio_encoder(source_fragment, middle_repeats)
+        intermediate = self.audio_encoder(source_fragment, mid_rep=middle_repeats)
         intermediate = self.bottleneck(intermediate)
         output = self.audio_decoder(intermediate, speaker_characteristic, middle_repeats)
         extra_loss = 0.003 * se_loss

@@ -1,6 +1,7 @@
+import random
 import torch
 import torch.nn as nn
-from torch import Tensor as T
+from torch import Tensor
 import einops
 
 
@@ -23,13 +24,13 @@ class SelfAttention(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.proj_out = nn.Linear(embed_dim, embed_dim)
 
-    def head_partition(self, x: T) -> T:
+    def head_partition(self, x: Tensor) -> Tensor:
         return einops.rearrange(x, '... s (h d) -> ... h s d', h=self.num_heads)
 
-    def head_merging(self, x: T) -> T:
+    def head_merging(self, x: Tensor) -> Tensor:
         return einops.rearrange(x, '... h s d -> ... s (h d)')
 
-    def forward(self, x: T) -> T:
+    def forward(self, x: Tensor) -> Tensor:
         q, k, v = self.project_qkv(x).chunk(3, dim=-1)
         q, k, v = map(self.head_partition, (q, k, v))
 
@@ -58,13 +59,13 @@ class CrossAttention(nn.Module):
         self.proj_out = nn.Linear(embed_dim, embed_dim)
         self.norm = nn.LayerNorm(embed_dim)
 
-    def head_partition(self, x: T) -> T:
+    def head_partition(self, x: Tensor) -> Tensor:
         return einops.rearrange(x, '... s (h d) -> ... h s d', h=self.num_heads)
 
-    def head_merging(self, x: T) -> T:
+    def head_merging(self, x: Tensor) -> Tensor:
         return einops.rearrange(x, '... h s d -> ... s (h d)')
 
-    def forward(self, layer_input: T, cross_attn_input: T) -> T:
+    def forward(self, layer_input: Tensor, cross_attn_input: T) -> T:
         q = self.project_q(layer_input)
         k, v = self.project_kv(cross_attn_input).chunk(2, dim=-1)
         q, k, v = map(self.head_partition, (q, k, v))
@@ -117,7 +118,7 @@ class TransformerBlock(nn.Module):
         self.mlp_dropout = nn.Dropout(p=mlp_drop)
         self.mlp_norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, x: T, cross_attn_inputs: [T] = []) -> T:
+    def forward(self, x: Tensor, cross_attn_inputs: [Tensor] = []) -> Tensor:
         out = self.self_attn_norm(x)
         out = self.self_attn(out)
         out = self.self_attn_dropout(out)
@@ -134,4 +135,40 @@ class TransformerBlock(nn.Module):
         out = self.mlp_dropout(out)
         x = x + out
 
+        return x
+
+
+class Transformer(nn.Module):
+    def __init__(self, embed_dim, mlp_hidden_dim, heads, drop, blocks_num, cross_n, mid_repeat_interval):
+        super().__init__()
+
+        blocks = []
+        for i in range(sum(blocks_num)):
+            this_cross_n = cross_n
+            blocks += [TransformerBlock(
+                embed_dim=embed_dim,
+                num_heads=heads,
+                mlp_hidden_dim=mlp_hidden_dim,
+                attn_drop=drop,
+                mlp_drop=drop,
+                n_cross_attn_blocks=this_cross_n
+            )]
+        self.blocks_pre = nn.ModuleList(blocks[:blocks_num[0]])
+        self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[0]+blocks_num[1]])
+        self.blocks_post = nn.ModuleList(blocks[blocks_num[0]+blocks_num[1]:])
+        self.mid_repeat_interval = mid_repeat_interval
+
+    def set_mid_repeat_interval(self, new_val):
+        self.mid_repeat_interval = (new_val, new_val + 1)
+
+    def forward(self, x: Tensor, cross: list[Tensor], mid_rep=None):
+        if mid_rep is None:  # TODO: this must always be passed from above
+            mid_rep = random.randint(*self.mid_repeat_interval)
+        for i, block in enumerate(self.blocks_pre):
+            x = block(x, cross)
+        for rep in range(mid_rep):
+            for i, block in enumerate(self.blocks_mid):
+                x = block(x, cross)
+        for i, block in enumerate(self.blocks_post):
+            x = block(x, cross)
         return x
