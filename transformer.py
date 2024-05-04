@@ -11,7 +11,7 @@ class PlanePositionalEmbedding(nn.Module):
         self.row_embed = nn.Parameter(torch.rand(plane_length, 1, embed_dim) * 0.01)
         self.column_embed = nn.Parameter(torch.rand(1, plane_width, embed_dim) * 0.01)
 
-    def forward(self, x: T) -> T:
+    def forward(self, x: Tensor) -> Tensor:
         return x + self.row_embed + self.column_embed
 
 
@@ -65,7 +65,7 @@ class CrossAttention(nn.Module):
     def head_merging(self, x: Tensor) -> Tensor:
         return einops.rearrange(x, '... h s d -> ... s (h d)')
 
-    def forward(self, layer_input: Tensor, cross_attn_input: T) -> T:
+    def forward(self, layer_input: Tensor, cross_attn_input: Tensor) -> Tensor:
         q = self.project_q(layer_input)
         k, v = self.project_kv(cross_attn_input).chunk(2, dim=-1)
         q, k, v = map(self.head_partition, (q, k, v))

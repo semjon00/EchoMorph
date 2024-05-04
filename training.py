@@ -10,7 +10,10 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import einops
 import sys
-import torchinfo
+try:
+    from torchinfo import summary as torchinfo_summary
+except:
+    def torchinfo_summary(*args): pass
 
 from model import EchoMorph, EchoMorphParameters, save_model, load_model
 from audio import AudioConventer, AUDIO_FORMATS
@@ -189,13 +192,17 @@ def load_progress():
 
     try:
         model = load_model(directory, device, precision, verbose=True)
+        pars = model.pars
         print(f'  Loaded an EchoMorph model.')
     except:
         pars = EchoMorphParameters()
         model = EchoMorph(pars).to(device=device, dtype=precision)
         print('  Initialized a new EchoMorph model...')
-    torchinfo.summary(model, ((args.batch_size, model.pars.history_len, model.pars.spect_width, 2),
-                              (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 2)))
+    for d in [1, 4]:
+        torchinfo_summary(model, ((args.batch_size, model.pars.history_len, model.pars.spect_width, 2),
+                                  (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 2)),
+                          depth=d)
+    print(pars.__dict__)
 
     try:
         consume: ConsumeProgress = pickle.load(open(directory / 'consume.bin', 'rb'))
@@ -312,7 +319,7 @@ def eval_model(model, eval_datasets):
         for target_sample, dataloader in eval_datasets:
             for history, fragments in iter(dataloader):
                 rep = r.randint(*model.pars.mid_repeat_interval)
-                pred, extra_loss = model(target_sample, fragments, middle_repeats=rep)
+                pred, extra_loss = model(history, fragments, middle_repeats=rep)
                 loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
                 if loss.isnan():
                     raise LossNaNException()
@@ -410,7 +417,7 @@ def training():
                 bt = time.time()
                 eval_loss = eval_model(model, eval_datasets)
                 if eval_loss:
-                    print('Eval loss: {}'.format(eval_loss))
+                    print('Eval loss | overall: {}'.format(eval_loss))
                     scheduler.step(eval_loss)
                 elif cumm_train_loss:
                     scheduler.step(eval_loss)

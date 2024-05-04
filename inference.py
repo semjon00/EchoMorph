@@ -34,7 +34,7 @@ class InferenceFreestyle:
     """InferenceFreestyle is a way to interact with the EchoMorph model. The class provides
     methods to perform actions on the objects from the internal bank. Objects are of two types:
     sounds and characteristics. Actions that result in creation of new objects save these objects with unique,
-    predictable and non-configureable names."""
+    predictable and non-configurable names."""
     def __init__(self):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.precision = torch.float32 if str(self.device) == "cpu" else torch.float16

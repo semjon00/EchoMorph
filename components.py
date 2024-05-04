@@ -27,7 +27,7 @@ class RandMachine(nn.Module):
         self.k_min = self.k_max = new_p
 
     def deterministic(self, seed):
-        self.rng.seed(random.randint(0, 2**32 - 1) if seed is None else seed)
+        self.rng.seed(random.randint(0, 2 ** 32 - 1) if seed is None else seed)
 
     def get_val(self):
         pp = self.rng.random() if self.mode == 'r' else 0.0
@@ -77,22 +77,3 @@ class PriorityNoise(RandMachine):
         noise = torch.randn_like(noise_levels)
 
         return self.norm2(self.norm1(x) + noise_levels * noise)
-
-
-class ConvNet(nn.Module):
-    def __init__(self, channels, repeats):
-        super().__init__()
-
-        def spawn_conv(n_from, n_to):
-            return nn.Sequential(
-                nn.Conv2d(n_from, n_to, kernel_size=3, padding='same'),
-                nn.ReLU(),
-            )
-        self.conv = nn.Sequential()
-        for i in range(len(channels) - 1):
-            for _ in range(repeats):
-                self.conv_down.append(spawn_conv(channels[i], channels[i + 1]))
-            self.conv_down.append(nn.MaxPool2d(kernel_size=2, stride=2))
-
-    def forward(self, x):
-        return self.conv(x)
