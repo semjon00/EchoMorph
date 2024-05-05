@@ -7,7 +7,7 @@
 # The job requires 1 task per node
 #SBATCH --ntasks-per-node=1
 # The maximum walltime of the job
-#SBATCH -t 10:00:00
+#SBATCH -t 10:10:00
 #SBATCH --mem=16G
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=semjon.00@gmail.com
@@ -16,17 +16,17 @@
 #SBATCH --exclude=falcon2
 
 module load any/python/3.8.3-conda
-#module load ffmpeg/4.4.1
-#module load sox/14.4.2
-conda activate transformers-course
-#conda install conda-forge::ffmpeg
-#conda install esri::einops
-
+# git pull --force
+git log -n 1 --pretty=format:"Commit: %H %s"
+# conda deactivate
+# conda create -n hypatia
+conda activate hypatia
+# conda install "conda-forge::ffmpeg<7" "pytorch::torchaudio" "conda-forge::einops" "conda-forge::torchinfo"
 export PYTHONUNBUFFERED=TRUE
 python training.py --save_time=1800 --batch_size=32 --total_epochs=20
 
 # Reminder:
-#sbatch train_job.sh
+#sbatch job_train.sh
 #squeue -u semjon00
 #squeue -j <job number>
 #scancel
