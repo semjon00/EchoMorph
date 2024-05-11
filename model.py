@@ -1,4 +1,3 @@
-from itertools import chain
 import torch
 from torch import Tensor, nn
 import einops
@@ -7,17 +6,14 @@ import os
 
 from components import PriorityNoise
 from cnn import CNN
-from transformer import PlanePositionalEmbedding, Transformer
+from transformer import MultidimPositionalEmbedding, Transformer
 
 # TODO: Re-introduce the history
-
 # TODO: Swin
 # TODO: Better loss function
 # TODO: in CNN, different convolutions should be used for different pitches (use groups parameter)
 
 # TODO: Refactor training parameters into a separate class (don't forget kl_loss!)
-
-# TODO: Do a code self-review, there can be some "fun" surprises!
 
 
 class EchoMorphParameters:
@@ -25,39 +21,31 @@ class EchoMorphParameters:
     def __init__(self, **kwargs):
         """By default, contains large model specs"""
         one_sec_len = round(24000 / 84 / 64) * 64  # sample_rate / hop_length; approximately
-        self.target_sample_len = one_sec_len // 2
-        self.history_len = one_sec_len // 2
-        self.fragment_len = one_sec_len // 8
+        self.target_sample_len = one_sec_len // 32
+        self.history_len = one_sec_len // 32
+        self.fragment_len = one_sec_len // 32
         assert self.target_sample_len == self.history_len, "oh no! - speaker encoding is TODO"
 
         self.spect_width = 128  # x_width
         self.length_of_patch = 8
 
-        self.embed_dim = 128
+        self.embed_dim = 64
 
-        self.se_convrec = (2, 8, 32, 64)
-        self.se_convrepeat = 6
-        self.se_blocks = (10, 0, 0)
-        self.se_heads = 4
-        self.se_hidden_dim = 4 * self.embed_dim
+        self.se_convrec = (2,)
+        self.se_convrepeat = 4
+        self.se_blocks = 4
         self.se_output_tokens = 256
-        self.se_kl_loss_k = 0.003
 
-        self.ae_convrec = (2, 8, 16, 32)
+        self.ae_convrec = (2,)
         self.ae_convrepeat = 4
-        self.ae_blocks = (6, 0, 0)
-        self.ae_heads = 4
-        self.ae_hidden_dim = 3 * self.embed_dim
+        self.ae_blocks = 4
 
-        self.ad_blocks = (16, 0, 0)
-        self.ad_heads = 8
-        self.ad_hidden_dim = 6 * self.embed_dim
+        self.ad_blocks = 4
 
-        self.drop = 0.00
-        self.rm_k_min = 0.0
+        self.rm_k_min = 1.0
         self.rm_k_max = 1.0
         self.rm_fun = 'lin'
-        self.mid_repeat_interval = (2, 5)  # (inclusive, exclusive)
+        self.se_kl_loss_k = 0.000
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -68,32 +56,30 @@ class SpeakerVAE(nn.Module):
         super().__init__()
 
         self.cnn = CNN(pars.se_convrec, pars.se_convrepeat)
-        self.transformer = Transformer(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.se_hidden_dim, heads=pars.se_heads,
-                                       drop=pars.drop, blocks_num=pars.se_blocks, cross_n=0)
-        self.entok = nn.Linear(self.cnn.out_channels(), pars.embed_dim)
         reduction = self.cnn.res_reduction_factor()
-        self.pos_embed = PlanePositionalEmbedding(
-            pars.history_len // reduction, pars.spect_width // reduction, pars.embed_dim
+        self.transformer = Transformer(
+            input_dim=self.cnn.out_channels, output_dim=pars.embed_dim,
+            input_size=(pars.history_len // reduction, pars.spect_width // reduction),
+            num_blocks=pars.se_blocks, embed_dim=pars.embed_dim, cross_n=0,
+            rearrange_back=False
         )
+
         self.out_tokens = pars.se_output_tokens
         self.mean_linear = nn.Linear(pars.embed_dim, pars.embed_dim)
         self.log_var_linear = nn.Linear(pars.embed_dim, pars.embed_dim)
 
-    def forward_shared(self, x: Tensor, mid_rep) -> (Tensor, Tensor):
+    def forward_shared(self, x: Tensor) -> (Tensor, Tensor):
         if len(x.shape) < 4:
             x = x.unsqueeze(0)
         x = self.cnn(x)
-        x = self.entok(x)
-        x = self.pos_embed(x)
-        x = einops.rearrange(x, '... l w d -> ... (l w) d')
-        x = self.transformer(x, [], mid_rep)
+        x = self.transformer(x, [])
 
         ret = x[..., :self.out_tokens, :]
         assert ret.size(-2) == self.out_tokens
         return ret
 
-    def forward_train(self, x, mid_rep):
-        ret_tok = self.forward_shared(x, mid_rep)
+    def forward_train(self, x):
+        ret_tok = self.forward_shared(x)
         means = self.mean_linear(ret_tok)
         log_vars = self.log_var_linear(ret_tok)
         kl_loss = torch.mean(0.5 * torch.sum(torch.exp(log_vars) + means ** 2 - log_vars - 1, dim=-1))
@@ -103,8 +89,8 @@ class SpeakerVAE(nn.Module):
         z = std * epsilon + means
         return z, kl_loss
 
-    def forward_use(self, x, mid_rep):
-        return self.mean_linear(self.forward_shared(x, mid_rep))
+    def forward_use(self, x):
+        return self.mean_linear(self.forward_shared(x))
 
 
 class AudioEncoder(nn.Module):
@@ -112,48 +98,37 @@ class AudioEncoder(nn.Module):
         super().__init__()
 
         self.cnn = CNN(pars.ae_convrec, pars.ae_convrepeat)
-        self.transformer = Transformer(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.ae_hidden_dim, heads=pars.ae_heads,
-                                       drop=pars.drop, blocks_num=pars.ae_blocks, cross_n=0)
-        self.entok = nn.Linear(self.cnn.out_channels(), pars.embed_dim)
         reduction = self.cnn.res_reduction_factor()
-        self.pos_embed = PlanePositionalEmbedding(
-            pars.fragment_len // reduction, pars.spect_width // reduction, pars.embed_dim
+        self.transformer = Transformer(
+            input_dim=self.cnn.out_channels, output_dim=pars.embed_dim,
+            input_size=(pars.fragment_len // reduction, pars.spect_width // reduction),
+            num_blocks=pars.ae_blocks, embed_dim=pars.embed_dim, cross_n=0,
+            rearrange_back=False
         )
 
-    def forward(self, x: Tensor, mid_rep) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = self.cnn(x)
-        x = self.entok(x)
-        x = self.pos_embed(x)
-        x = einops.rearrange(x, '... l w d -> ... (l w) d')
-        x = self.transformer.forward(x, [], mid_rep)
+        x = self.transformer(x, [])
         return x
 
 
 class AudioDecoder(Transformer):
     def __init__(self, pars: EchoMorphParameters):
-        super().__init__(embed_dim=pars.embed_dim, mlp_hidden_dim=pars.ad_hidden_dim, heads=pars.ad_heads,
-                         drop=pars.drop, blocks_num=pars.ad_blocks, cross_n=2)
+        super().__init__(input_dim=pars.embed_dim, output_dim=2 * pars.length_of_patch,
+                         input_size=(pars.fragment_len // pars.length_of_patch, pars.spect_width),
+                         num_blocks=pars.ad_blocks, embed_dim=pars.embed_dim, cross_n=2)
 
         self.spect_width = pars.spect_width
         self.fragment_len = pars.fragment_len
         self.length_of_patch = pars.length_of_patch
         self.embed_dim = pars.embed_dim
 
-        self.detok = nn.Linear(pars.embed_dim, 2 * pars.length_of_patch)
-        self.pos_embed = PlanePositionalEmbedding(
-            self.fragment_len // self.length_of_patch, self.spect_width, self.embed_dim
-        )
-
-    def forward(self, im: Tensor, sc: Tensor, mid_rep) -> Tensor:
+    def forward(self, im: Tensor, sc: Tensor) -> Tensor:
         dims = [self.fragment_len // self.length_of_patch, self.spect_width, self.embed_dim]
         if len(im.size()) > 2:
             dims = [im.size(0)] + dims
         feed = self.pos_embed(torch.zeros(dims, dtype=im.dtype, device=im.device))
-        feed = einops.rearrange(feed, '... l w d -> ... (l w) d')
-        x = super().forward(feed, [im, sc], mid_rep)
-
-        x = einops.rearrange(x, '... (l w) d -> ... l w d', w=self.spect_width)
-        x = self.detok(x)
+        x = super().forward(feed, [im, sc])
         x = einops.rearrange(x, ' ... l w (c ld) -> ... (l ld) w c', ld=self.length_of_patch)
         return x
 
@@ -169,27 +144,14 @@ class EchoMorph(nn.Module):
         )
         self.audio_decoder = AudioDecoder(pars)
 
-    def forward(self, target_sample, source_fragment, middle_repeats):
+    def forward(self, target_sample, source_fragment):
         """Used for training, use inference.py for inference"""
-        speaker_characteristic, se_loss = self.speaker_encoder.forward_train(target_sample, middle_repeats)
-        intermediate = self.audio_encoder(source_fragment, middle_repeats)
+        speaker_characteristic, se_loss = self.speaker_encoder.forward_train(target_sample)
+        intermediate = self.audio_encoder(source_fragment)
         intermediate = self.bottleneck(intermediate)
-        output = self.audio_decoder(intermediate, speaker_characteristic, middle_repeats)
+        output = self.audio_decoder(intermediate, speaker_characteristic)
         extra_loss = self.pars.se_kl_loss_k * se_loss
         return output, extra_loss
-
-    def get_multiplication_parameters(self):
-        return chain.from_iterable([
-            m.blocks_mid.parameters() for m in [self.speaker_encoder.transformer,
-                                                self.audio_encoder.transformer,
-                                                self.audio_decoder]
-        ])
-
-    def get_base_parameters(self):
-        mult_params = set(self.get_multiplication_parameters())
-        all_params = set(self.parameters())
-        base_params = list(all_params - mult_params)
-        return base_params
 
 
 def load_model(directory, device, dtype, verbose=False):

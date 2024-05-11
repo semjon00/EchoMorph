@@ -43,6 +43,7 @@ def print(*args, **kwargs):
 def print_cuda_stats():
     if str(device) == "cpu":
         print(f'Cuda memory | CPU is used')
+        return
     try:
         vals = torch.cuda.mem_get_info()
         print(f'Cuda memory | free:{str(vals[0])} total:{str(vals[1])}')
@@ -201,7 +202,7 @@ def load_progress():
     for d in [1, 4]:
         torchinfo_summary(model, ((args.batch_size, model.pars.history_len, model.pars.spect_width, 2),
                                   (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 2),),
-                          middle_repeats=1, depth=d)
+                          depth=d)
     print(pars.__dict__)
 
     try:
@@ -314,12 +315,10 @@ def eval_model(model, eval_datasets):
     total_items = 0
     with torch.inference_mode():
         model.eval()
-        r = random.Random(42)
         model.bottleneck.deterministic(42)
         for target_sample, dataloader in eval_datasets:
             for history, fragments in iter(dataloader):
-                rep = r.randint(*model.pars.mid_repeat_interval)
-                pred, extra_loss = model(history, fragments, rep)
+                pred, extra_loss = model(history, fragments)
                 loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
                 if loss.isnan():
                     raise LossNaNException()
@@ -361,8 +360,7 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
     model.train()
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
-        mid_rep = random.randint(*model.pars.mid_repeat_interval)
-        pred, extra_loss = model(history, fragments, mid_rep)
+        pred, extra_loss = model(history, fragments)
         loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
         if loss.isnan():
             raise LossNaNException()
@@ -384,12 +382,7 @@ def training():
     lr, = training_params
     eval_datasets = create_eval_datasets(model.pars)
     last_save = time.time()
-    optimizer = torch.optim.Adam([
-        {'params': model.get_base_parameters(),
-         'lr': lr},
-        {'params': model.get_multiplication_parameters(),
-         'lr': (lr / (sum(model.pars.mid_repeat_interval) - 1))}
-    ])
+    optimizer = torch.optim.Adam(model.parameters(), lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=30, min_lr=1e-8,
                                                            threshold=0.001, threshold_mode='rel')
     print_cuda_stats()

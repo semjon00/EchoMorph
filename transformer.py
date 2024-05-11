@@ -1,176 +1,172 @@
-import random
+import string
+
 import torch
 import torch.nn as nn
 from torch import Tensor
 import einops
 
 
-class PlanePositionalEmbedding(nn.Module):
-    def __init__(self, plane_length: int, plane_width: int, embed_dim: int):
+class MultidimPositionalEmbedding(nn.Module):
+    def __init__(self, space_dims, embed_dim):
         super().__init__()
-        self.row_embed = nn.Parameter(torch.rand(plane_length, 1, embed_dim) * 0.01)
-        self.column_embed = nn.Parameter(torch.rand(1, plane_width, embed_dim) * 0.01)
+        if isinstance(space_dims, int): space_dims = (space_dims,)
+        self.pars = nn.ParameterList()
+        for i in range(len(space_dims)):
+            size = [1 for _ in range(len(space_dims))] + [embed_dim]
+            size[i] = space_dims[i]
+            self.pars.append(nn.Parameter(torch.empty(*size)))
+            nn.init.trunc_normal_(self.pars[i])
 
-    def forward(self, x: Tensor) -> Tensor:
-        return x + self.row_embed + self.column_embed
+    def forward(self, x):
+        for par in self.pars:
+            x = x + par
+        return x
 
 
-class FullPlanePositionalEmbedding(nn.Module):
-    def __init__(self, plane_length: int, plane_width: int, embed_dim: int):
-        super().__init__()
-        self.pos_embed = nn.Parameter(torch.rand(plane_length, plane_width, embed_dim) * 0.01)
-
-    def forward(self, x: Tensor) -> Tensor:
-        return x + self.pos_embed
-
-class SelfAttention(nn.Module):
+class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int):
         super().__init__()
-        self.num_heads = num_heads
-        self.scale = (embed_dim // self.num_heads) ** -0.5
-        self.project_qkv = nn.Linear(embed_dim, embed_dim * 3)
+        self.embed_dim = embed_dim
+        self.ql = nn.Linear(embed_dim, embed_dim)
+        self.kl = nn.Linear(embed_dim, embed_dim)
+        self.vl = nn.Linear(embed_dim, embed_dim)
         self.softmax = nn.Softmax(dim=-1)
-        self.proj_out = nn.Linear(embed_dim, embed_dim)
+        self.scale = (embed_dim // num_heads) ** -0.5
+        self.num_heads = num_heads
+        self.project = nn.Linear(embed_dim, embed_dim)
 
     def head_partition(self, x: Tensor) -> Tensor:
-        return einops.rearrange(x, '... s (h d) -> ... h s d', h=self.num_heads)
+        return einops.rearrange(x, '... n (nh ch) -> ... nh n ch', nh=self.num_heads)
 
     def head_merging(self, x: Tensor) -> Tensor:
-        return einops.rearrange(x, '... h s d -> ... s (h d)')
+        return einops.rearrange(x, '... nh n ch -> ... n (nh ch)')
 
-    def forward(self, x: Tensor) -> Tensor:
-        q, k, v = self.project_qkv(x).chunk(3, dim=-1)
+    def forward(self, x: Tensor, cross: Tensor = None) -> Tensor:
+        if cross == None: cross = x
+        q, k, v = self.ql(x), self.kl(cross), self.vl(cross)
         q, k, v = map(self.head_partition, (q, k, v))
 
-        attn_scores = torch.einsum('...qc,...kc->...qk', q, k) * self.scale
-        attn_weights = self.softmax(attn_scores)
-
-        out = torch.einsum('...qv,...vc->...qc', attn_weights, v)
+        attention = q @ k.transpose(-1, -2) * self.scale
+        attention = self.softmax(attention)
+        out = attention @ v
         out = self.head_merging(out)
-        out = self.proj_out(out)
+        out = self.project(out)
         return out
-
-
-class CrossAttention(nn.Module):
-    """Cross attention and also the following normalization layer"""
-    def __init__(
-            self, 
-            embed_dim: int, 
-            num_heads: int
-    ):
-        super().__init__()
-        self.num_heads = num_heads
-        self.scale = (embed_dim // self.num_heads) ** -0.5
-        self.project_q = nn.Linear(embed_dim, embed_dim)
-        self.project_kv = nn.Linear(embed_dim, embed_dim * 2)
-        self.softmax = nn.Softmax(dim=-1)
-        self.proj_out = nn.Linear(embed_dim, embed_dim)
-        self.norm = nn.LayerNorm(embed_dim)
-
-    def head_partition(self, x: Tensor) -> Tensor:
-        return einops.rearrange(x, '... s (h d) -> ... h s d', h=self.num_heads)
-
-    def head_merging(self, x: Tensor) -> Tensor:
-        return einops.rearrange(x, '... h s d -> ... s (h d)')
-
-    def forward(self, layer_input: Tensor, cross_attn_input: Tensor) -> Tensor:
-        q = self.project_q(layer_input)
-        k, v = self.project_kv(cross_attn_input).chunk(2, dim=-1)
-        q, k, v = map(self.head_partition, (q, k, v))
-
-        attn_scores = torch.einsum('...qc,...kc->...qk', q, k) * self.scale
-        attn_weights = self.softmax(attn_scores)
-
-        out = torch.einsum('...qv,...vc->...qc', attn_weights, v)
-        out = self.head_merging(out)
-        out = self.proj_out(out)
-
-        return out
-
-
-class MLP(nn.Sequential):
-    def __init__(self, embed_dim: int, hidden_dim: int):
-        super().__init__(
-            nn.Linear(embed_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, embed_dim)
-        )
 
 
 class TransformerBlock(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int,
-        num_heads: int,
-        mlp_hidden_dim: int,
-        attn_drop: float,
-        mlp_drop: float,
-        n_cross_attn_blocks: int = 0
-    ):
+    def __init__(self, embed_dim: int, n_cross_attn_blocks: int = 0, num_heads: int = 4, mlp_hidden_dim: int = None):
         super().__init__()
-        self.self_attn = SelfAttention(embed_dim, num_heads)
-        self.self_attn_dropout = nn.Dropout(p=attn_drop)
-        self.self_attn_norm = nn.LayerNorm(embed_dim)
-
-        self.cross_attn_blocks = nn.ModuleList([
-            CrossAttention(embed_dim, num_heads)
-            for _ in range(n_cross_attn_blocks)
-        ])
-        # Dropout? Whatever...
-        self.cross_attn_norm = nn.ModuleList([
-            nn.LayerNorm(embed_dim)
-            for _ in range(n_cross_attn_blocks)
-        ])
-
-        self.mlp = MLP(embed_dim, mlp_hidden_dim)
-        self.mlp_dropout = nn.Dropout(p=mlp_drop)
+        self.selfattn_norm = nn.LayerNorm(embed_dim)
+        self.selfattn = MultiHeadAttention(embed_dim, num_heads)
+        self.crossattn_norm = nn.Sequential()
+        self.crossattn = nn.Sequential()
+        for _ in range(n_cross_attn_blocks):
+            self.crossattn_norm.append(nn.LayerNorm(embed_dim))
+            self.crossattn.append(MultiHeadAttention(embed_dim, num_heads))
         self.mlp_norm = nn.LayerNorm(embed_dim)
+        if not mlp_hidden_dim: mlp_hidden_dim = 4 * embed_dim
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim, mlp_hidden_dim),
+            nn.GELU(),
+            nn.Linear(mlp_hidden_dim, embed_dim)
+        )
 
-    def forward(self, x: Tensor, cross_attn_inputs: [Tensor] = []) -> Tensor:
-        out = self.self_attn_norm(x)
-        out = self.self_attn(out)
-        out = self.self_attn_dropout(out)
-        x = x + out
-
-        for i in range(len(self.cross_attn_norm)):
-            out = self.cross_attn_norm[i](x)
-            # Normalize cross inputs?
-            out = self.cross_attn_blocks[i](out, cross_attn_inputs[i])
-            x = x + out
-
-        out = self.mlp_norm(x)
-        out = self.mlp(out)
-        out = self.mlp_dropout(out)
-        x = x + out
-
-        return x
+    def forward(self, x: Tensor, cross: list[Tensor] = ()) -> Tensor:
+        assert len(cross) == len(self.crossattn)
+        out = x + self.selfattn(self.selfattn_norm(x))
+        for i in range(len(cross)):
+            out = out + self.crossattn[i](self.crossattn_norm[i](out), cross[i])
+        out = out + self.mlp(self.mlp_norm(out))
+        return out
 
 
 class Transformer(nn.Module):
-    def __init__(self, embed_dim, mlp_hidden_dim, heads, drop, blocks_num, cross_n):
+    def __init__(self, input_dim: int, output_dim: int, input_size: tuple,
+                 num_blocks: int, embed_dim: int, cross_n: int, num_heads: int = 4, mlp_hidden_dim: int = None,
+                 rearrange_back=True):
         super().__init__()
+        self.embedding = nn.Linear(input_dim, embed_dim)
+        self.rearrange_back = rearrange_back
+        self.input_size = input_size
+        self.pos_embed = MultidimPositionalEmbedding(input_size, embed_dim)
+        self.blocks = nn.ModuleList([TransformerBlock(embed_dim, cross_n, num_heads, mlp_hidden_dim)
+                                     for _ in range(num_blocks)])
+        self.final_projection = nn.Linear(embed_dim, output_dim)
 
-        blocks = []
-        for i in range(sum(blocks_num)):
-            this_cross_n = cross_n
-            blocks += [TransformerBlock(
-                embed_dim=embed_dim,
-                num_heads=heads,
-                mlp_hidden_dim=mlp_hidden_dim,
-                attn_drop=drop,
-                mlp_drop=drop,
-                n_cross_attn_blocks=this_cross_n
-            )]
-        self.blocks_pre = nn.ModuleList(blocks[:blocks_num[0]])
-        self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[0]+blocks_num[1]])
-        self.blocks_post = nn.ModuleList(blocks[blocks_num[0]+blocks_num[1]:])
+    def forward(self, x: Tensor, cross: list[Tensor] = ()) -> Tensor:
+        out = self.embedding(x)
+        out = self.pos_embed(out)
+        rec = {string.ascii_lowercase[i]: self.input_size[i] for i in range(len(self.input_size))}
+        reck = ' '.join(rec.keys())
+        out = einops.rearrange(out, f'... {reck} ed -> ... ({reck}) ed', **rec)
+        for block in self.blocks:
+            out = block(out, cross)
+        if self.rearrange_back:
+            out = einops.rearrange(out, f'... ({reck}) ed -> ... {reck} ed', **rec)
+        out = self.final_projection(out)
+        return out
 
-    def forward(self, x: Tensor, cross: list[Tensor], mid_rep):
-        for i, block in enumerate(self.blocks_pre):
-            x = block(x, cross)
-        for rep in range(mid_rep):
-            for i, block in enumerate(self.blocks_mid):
-                x = block(x, cross)
-        for i, block in enumerate(self.blocks_post):
-            x = block(x, cross)
-        return x
+
+if __name__ == '__main__':
+    print('Running transformer test')
+    def task_a():
+        def rep(x, t):
+            x = einops.repeat(torch.Tensor(x), '... -> l ... a', a=1, l=1)
+            return x
+        def inp(ed, s):
+            seq = torch.rand(s)
+            cr_0 = torch.rand(s)
+            cr_1 = torch.rand(s)
+            ## A ##
+            ans = cr_0 - cr_1
+            seq *= 0
+            ## B ##
+            # ans = seq.flip(0)
+            # for i in range(0, s, 3):
+            #     ans[i] *= cr_0[i] - 0.5 * cr_1[(i + 1) % s]
+            # End
+            seq, cr_0, cr_1, ans = [rep(x, ed).clone() for x in [seq, cr_0, cr_1, ans]]
+            return seq, cr_0, cr_1, ans
+        def inpoup(b, ed, s):
+            acm = [[], [], [], []]
+            for _ in range(b):
+                n = inp(ed, s)
+                for i in range(len(acm)):
+                    acm[i] += [n[i]]
+            for i in range(len(acm)):
+                acm[i] = torch.cat(acm[i])
+            return acm
+        return inpoup
+    inpoup = task_a()
+
+    b = 256
+    ed = 64
+    s = 16
+    tr = Transformer(1, 1, (s,), 10, ed, 2)
+    emp = Transformer(1, ed, (s,), 0, ed, 0)
+    try:
+        import matplotlib.pyplot as plt
+        import torchinfo
+        torchinfo.summary(tr)
+    except:
+        pass
+    optimizer = torch.optim.Adam({*tr.parameters(), *emp.parameters()}, 0.0002)
+    losses = []
+    for its in range(100000 + 1):
+        optimizer.zero_grad()
+        x, cross_0, cross_1, ans = inpoup(b, ed, s)
+        out = tr(x, (emp(cross_0), emp(cross_1)))
+        loss: Tensor = torch.nn.functional.mse_loss(out, ans)
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+        if len(losses) % 10 == 0:
+            try:
+                plt.title(f'Loss: {losses[-1]}')
+                plt.plot(list(range(len(losses))), losses)
+                plt.ylim(0, 0.25)
+                plt.xlim(0, (len(losses) + 110) // 100 * 100)
+                plt.show()
+            except:
+                pass
