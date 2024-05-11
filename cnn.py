@@ -12,6 +12,7 @@ class CNNBlock(nn.Module):
         self.relu = ReLU()
         self.conv2 = Conv2d(channels_out, channels_out, kernel_size=kernel_size, padding='same')
         self.bn2 = BatchNorm2d(channels_out)
+        self.channels = (channels_in, channels_out)
 
     def forward(self, x: Tensor):
         x = self.bn1(self.conv1(x))
@@ -23,6 +24,7 @@ class CNNBlock(nn.Module):
 class CNN(nn.Module):
     def __init__(self, channels, repeats, kernel_size=5):
         super().__init__()
+        self.out_channels = channels[-1]
 
         self.seq = nn.ModuleList()
         for i in range(len(channels) - 1):
@@ -33,6 +35,9 @@ class CNN(nn.Module):
                 layer.append(CNNBlock(c_in, c_out, kernel_size))
             layer.append(nn.MaxPool2d(kernel_size=2, stride=2))
             self.seq.append(layer)
+
+    def res_reduction_factor(self):
+        return 2 ** (len(self.seq))
 
     def forward(self, x: Tensor):
         x = einops.rearrange(x, '... l w c -> ... c l w')

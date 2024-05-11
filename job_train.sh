@@ -21,7 +21,7 @@ git log -n 1 --pretty=format:"Commit: %H %s"
 # conda deactivate
 # conda create -n hypatia
 conda activate hypatia
-# conda install "conda-forge::ffmpeg<7" "pytorch::torchaudio" "conda-forge::einops" "conda-forge::torchinfo"
+# conda install "pytorch::pytorch-cuda" "pytorch::torchaudio" "conda-forge::einops" "conda-forge::torchinfo" "conda-forge::ffmpeg<7" -c nvidia
 export PYTHONUNBUFFERED=TRUE
 python training.py --save_time=1800 --batch_size=32 --total_epochs=20
 

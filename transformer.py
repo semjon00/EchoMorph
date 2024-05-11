@@ -15,6 +15,14 @@ class PlanePositionalEmbedding(nn.Module):
         return x + self.row_embed + self.column_embed
 
 
+class FullPlanePositionalEmbedding(nn.Module):
+    def __init__(self, plane_length: int, plane_width: int, embed_dim: int):
+        super().__init__()
+        self.pos_embed = nn.Parameter(torch.rand(plane_length, plane_width, embed_dim) * 0.01)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x + self.pos_embed
+
 class SelfAttention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int):
         super().__init__()
@@ -139,7 +147,7 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, embed_dim, mlp_hidden_dim, heads, drop, blocks_num, cross_n, mid_repeat_interval):
+    def __init__(self, embed_dim, mlp_hidden_dim, heads, drop, blocks_num, cross_n):
         super().__init__()
 
         blocks = []
@@ -156,14 +164,8 @@ class Transformer(nn.Module):
         self.blocks_pre = nn.ModuleList(blocks[:blocks_num[0]])
         self.blocks_mid = nn.ModuleList(blocks[blocks_num[0]:blocks_num[0]+blocks_num[1]])
         self.blocks_post = nn.ModuleList(blocks[blocks_num[0]+blocks_num[1]:])
-        self.mid_repeat_interval = mid_repeat_interval
 
-    def set_mid_repeat_interval(self, new_val):
-        self.mid_repeat_interval = (new_val, new_val + 1)
-
-    def forward(self, x: Tensor, cross: list[Tensor], mid_rep=None):
-        if mid_rep is None:  # TODO: this must always be passed from above
-            mid_rep = random.randint(*self.mid_repeat_interval)
+    def forward(self, x: Tensor, cross: list[Tensor], mid_rep):
         for i, block in enumerate(self.blocks_pre):
             x = block(x, cross)
         for rep in range(mid_rep):

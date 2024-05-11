@@ -127,7 +127,7 @@ class InferenceFreestyle:
         play_audio(tmpfile.name)
         os.remove(tmpfile.name)
 
-    def derive_sc(self, name, repeats=1):
+    def derive_sc(self, name, repeats=1, block_repeats=1):
         """Derives speaker characteristic from waveform. Can derive multiple and average them out."""
         assert repeats > 0
         with torch.inference_mode():
@@ -139,14 +139,14 @@ class InferenceFreestyle:
                 sg = torch.cat((padding, sg, padding), dim=0)
 
             print('Deriving: [', end='')
-            out = self.model.speaker_encoder.forward_use(sg[0:0+tsl, :])
+            out = self.model.speaker_encoder.forward_use(sg[0:0+tsl, :], block_repeats)
             print('.', end='')
             start_end = sg.size(0) - tsl
             start = 0
             for i in range(1, repeats):
                 # Deterministic, but uniform-like distribution of starting points
                 start = (start + 2147483647) % start_end
-                out += self.model.speaker_encoder.forward_use(sg[start:start+tsl, :])
+                out += self.model.speaker_encoder.forward_use(sg[start:start+tsl, :], block_repeats)
                 print('.', end='')
             print('] Done!')
             out /= repeats
@@ -177,8 +177,6 @@ class InferenceFreestyle:
         # TODO: multi-merge (averaging multiple infer-s with slightly different windowing)
         # Updating model settings
         assert 0 <= quality
-        for mp in [self.model.audio_encoder, self.model.audio_decoder]:
-            mp.set_mid_repeat_interval(quality)
         self.model.bottleneck.set_p(tradeoff)
 
         do_lerp = '->' in sc_name
@@ -201,14 +199,14 @@ class InferenceFreestyle:
                 else:
                     cur_sc = sc
                 intermediate = self.model.audio_encoder(
-                    source[cur:cur + fl, :].unsqueeze(0)
+                    source[cur:cur + fl, :].unsqueeze(0), quality
                 )
                 if radiation > 1e-9:
                     intermediate += torch.where(intermediate == 0, torch.tensor(0),
                                                 torch.randn_like(intermediate) * radiation)
                 intermediate = self.model.bottleneck(intermediate)
                 target[cur:cur + fl, :] = self.model.audio_decoder(
-                    intermediate, cur_sc
+                    intermediate, cur_sc, quality
                 )
                 print('.', end='')
             print('] Done!')

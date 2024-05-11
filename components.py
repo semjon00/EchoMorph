@@ -27,6 +27,8 @@ class RandMachine(nn.Module):
         self.k_min = self.k_max = new_p
 
     def deterministic(self, seed):
+        if self.mode == 'c':
+            return
         self.rng.seed(random.randint(0, 2 ** 32 - 1) if seed is None else seed)
 
     def get_val(self):
@@ -63,7 +65,6 @@ class PriorityNoise(RandMachine):
 
     def forward(self, x: Tensor):
         val = super().get_val()
-        val = val * (self.k_max - self.k_min) + self.k_min
 
         # Make quality levels strictly conform to the budget constraint
         unadjusted_quality = self.importance(x)

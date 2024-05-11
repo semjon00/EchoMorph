@@ -42,12 +42,12 @@ def print(*args, **kwargs):
 
 def print_cuda_stats():
     if str(device) == "cpu":
-        return
+        print(f'Cuda memory | CPU is used')
     try:
         vals = torch.cuda.mem_get_info()
         print(f'Cuda memory | free:{str(vals[0])} total:{str(vals[1])}')
     except:
-        print('Failed to display cuda memory availability.')
+        print('Cuda memory | Failed to display!')
 
 
 class ConsumeProgress:
@@ -200,8 +200,8 @@ def load_progress():
         print('  Initialized a new EchoMorph model...')
     for d in [1, 4]:
         torchinfo_summary(model, ((args.batch_size, model.pars.history_len, model.pars.spect_width, 2),
-                                  (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 2)),
-                          depth=d)
+                                  (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 2),),
+                          middle_repeats=1, depth=d)
     print(pars.__dict__)
 
     try:
@@ -319,7 +319,7 @@ def eval_model(model, eval_datasets):
         for target_sample, dataloader in eval_datasets:
             for history, fragments in iter(dataloader):
                 rep = r.randint(*model.pars.mid_repeat_interval)
-                pred, extra_loss = model(history, fragments, middle_repeats=rep)
+                pred, extra_loss = model(history, fragments, rep)
                 loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
                 if loss.isnan():
                     raise LossNaNException()
@@ -329,21 +329,6 @@ def eval_model(model, eval_datasets):
     if total_items == 0:
         return None
     return total_loss / total_items
-
-
-loss_function_freq_significance_cache = None
-
-
-def loss_function_freq_significance(width, device):
-    global loss_function_freq_significance_cache
-    if loss_function_freq_significance_cache is None or loss_function_freq_significance_cache[0] != width:
-        vals = torch.arange(start=20, end=16000 * (width + 1) / width, step=16000 / 128).log2()
-        vals = vals[1:] - vals[:-1]
-        vals = vals / torch.sum(vals) * width
-        loss_function_freq_significance_cache = width, vals
-    if loss_function_freq_significance_cache[1].device != device:
-        loss_function_freq_significance_cache = width, loss_function_freq_significance_cache[1].to(device)
-    return loss_function_freq_significance_cache[1]
 
 
 def loss_function(pred, truth):
@@ -376,7 +361,8 @@ def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spec
     model.train()
     for history, fragments in iter(dataloader):
         optimizer.zero_grad()
-        pred, extra_loss = model(history, fragments)
+        mid_rep = random.randint(*model.pars.mid_repeat_interval)
+        pred, extra_loss = model(history, fragments, mid_rep)
         loss: Tensor = loss_function(pred.float(), fragments.float()).to(dtype=precision) + extra_loss
         if loss.isnan():
             raise LossNaNException()
