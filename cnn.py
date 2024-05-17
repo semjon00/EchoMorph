@@ -1,7 +1,6 @@
 from torch import Tensor, nn
 import einops
 from torch.nn import Conv2d, BatchNorm2d, ReLU
-import torch.nn.functional as F
 
 
 class CNNBlock(nn.Module):
@@ -33,19 +32,16 @@ class CNN(nn.Module):
                 c_in = channels[i + 1] if r != 0 else channels[i]
                 c_out = channels[i + 1]
                 layer.append(CNNBlock(c_in, c_out, kernel_size))
-            layer.append(nn.MaxPool2d(kernel_size=2, stride=2))
+            if i != len(channels) - 1 - 1:
+                layer.append(nn.MaxPool2d(kernel_size=2, stride=2))
             self.seq.append(layer)
 
     def res_reduction_factor(self):
-        return 2 ** (len(self.seq))
+        return 2 ** (max(0, len(self.seq) - 1))
 
     def forward(self, x: Tensor):
         x = einops.rearrange(x, '... l w c -> ... c l w')
-        downscaled_residual = x
-        init_channels = downscaled_residual.size(-3)
         for layer in self.seq:
-            downscaled_residual = F.max_pool2d(downscaled_residual, kernel_size=2, stride=2)
-            x = layer(x)
-            x[..., :init_channels, :, :] = downscaled_residual  # TODO: laaaazy code!
+            x = x + layer(x)
         x = einops.rearrange(x, ' ... c l w -> ... l w c')
         return x

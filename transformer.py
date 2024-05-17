@@ -12,7 +12,8 @@ class MultidimPositionalEmbedding(nn.Module):
         if isinstance(space_dims, int): space_dims = (space_dims,)
         self.pars = nn.ParameterList()
         for i in range(len(space_dims)):
-            size = [1 for _ in range(len(space_dims))] + [embed_dim]
+            size = [int(1)] * len(space_dims)
+            size.append(embed_dim)
             size[i] = space_dims[i]
             self.pars.append(nn.Parameter(torch.empty(*size)))
             nn.init.trunc_normal_(self.pars[i])
