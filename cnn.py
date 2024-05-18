@@ -26,22 +26,25 @@ class CNN(nn.Module):
         self.out_channels = channels[-1]
 
         self.seq = nn.ModuleList()
+        self.res = nn.ModuleList()
         for i in range(len(channels) - 1):
             layer = nn.Sequential()
             for r in range(repeats):
                 c_in = channels[i + 1] if r != 0 else channels[i]
                 c_out = channels[i + 1]
                 layer.append(CNNBlock(c_in, c_out, kernel_size))
-            if i != len(channels) - 1 - 1:
-                layer.append(nn.MaxPool2d(kernel_size=2, stride=2))
             self.seq.append(layer)
+            self.res.append(nn.Conv2d(channels[i], channels[i + 1], kernel_size=1))
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
     def res_reduction_factor(self):
         return 2 ** (max(0, len(self.seq) - 1))
 
     def forward(self, x: Tensor):
         x = einops.rearrange(x, '... l w c -> ... c l w')
-        for layer in self.seq:
-            x = x + layer(x)
+        for i in range(len(self.seq)):
+            x = self.seq[i](x) + self.res[i](x)
+            if i != len(self.seq) - 1:
+                x = self.pool(x)
         x = einops.rearrange(x, ' ... c l w -> ... l w c')
         return x
