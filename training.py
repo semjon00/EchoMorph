@@ -136,7 +136,7 @@ def report(optimizer, consume, avg_loss, avg_loss_origin: pathlib.Path):
     percent_consumed = 100 * consume.consumed_prop()
     current_lr = optimizer.param_groups[0]['lr']
     fn_string = f'{avg_loss_origin.parts[-2]}/{avg_loss_origin.parts[-1]}'
-    avg_loss = "\u221E" if avg_loss is None else f'{avg_loss:03.5f}'
+    avg_loss = "\u221E" if avg_loss is None else f'{avg_loss:03.6f}'
     print(f'Report | {percent_consumed:02.3f}% | lr {1e6 * current_lr:03.3f}q | {avg_loss} loss on "{fn_string}"')
 
 

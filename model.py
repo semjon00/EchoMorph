@@ -9,9 +9,9 @@ from cnn import CNN
 from transformer import MultidimPositionalEmbedding, Transformer
 
 # TODO: Re-introduce the history
-# TODO: Swin
 # TODO: Better loss function
 # TODO: in CNN, different convolutions should be used for different pitches (use groups parameter)
+# TODO: bottleneck after encoders (via 2 linear layers tokenwise)
 
 # TODO: Refactor training parameters into a separate class (don't forget kl_loss!)
 
@@ -21,26 +21,26 @@ class EchoMorphParameters:
     def __init__(self, **kwargs):
         """By default, contains large model specs"""
         one_sec_len = round(24000 / 84 / 64) * 64  # sample_rate / hop_length; approximately
-        self.target_sample_len = one_sec_len // 32
-        self.history_len = one_sec_len // 32
-        self.fragment_len = one_sec_len // 32
+        self.target_sample_len = one_sec_len // 8
+        self.history_len = one_sec_len // 8
+        self.fragment_len = one_sec_len // 16
         assert self.target_sample_len == self.history_len, "oh no! - speaker encoding is TODO"
 
-        self.spect_width = 128  # x_width
+        self.spect_width = 128
         self.length_of_patch = 8
 
-        self.embed_dim = 64
+        self.embed_dim = 256
 
-        self.se_convrec = (2,)
-        self.se_convrepeat = 4
-        self.se_blocks = 4
-        self.se_output_tokens = 256
+        self.se_convrec = (2, 8, 32)
+        self.se_convrepeat = 6
+        self.se_blocks = 16
+        self.se_output_tokens = 1024
 
-        self.ae_convrec = (2,)
-        self.ae_convrepeat = 4
-        self.ae_blocks = 4
+        self.ae_convrec = (2, 4, 8, 16)
+        self.ae_convrepeat = 16
+        self.ae_blocks = 8
 
-        self.ad_blocks = 4
+        self.ad_blocks = 16
 
         self.rm_k_min = 1.0
         self.rm_k_max = 1.0
@@ -75,7 +75,7 @@ class SpeakerVAE(nn.Module):
         x = self.transformer(x, [])
 
         ret = x[..., :self.out_tokens, :]
-        assert ret.size(-2) == self.out_tokens
+        assert ret.size(-2) == self.out_tokens, f"{ret.size(-2) = } {self.out_tokens = }"
         return ret
 
     def forward_train(self, x):
