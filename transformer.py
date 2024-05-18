@@ -60,8 +60,8 @@ class TransformerBlock(nn.Module):
         super().__init__()
         self.selfattn_norm = nn.LayerNorm(embed_dim)
         self.selfattn = MultiHeadAttention(embed_dim, num_heads)
-        self.crossattn_norm = nn.Sequential()
-        self.crossattn = nn.Sequential()
+        self.crossattn_norm = nn.ModuleList()
+        self.crossattn = nn.ModuleList()
         for _ in range(n_cross_attn_blocks):
             self.crossattn_norm.append(nn.LayerNorm(embed_dim))
             self.crossattn.append(MultiHeadAttention(embed_dim, num_heads))

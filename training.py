@@ -254,20 +254,19 @@ def take_a_bite(consume: ConsumeProgress):
     if sel is None:
         return None, None
 
-    # About 10 minutes, don't care about the bitrate and the exact value
-    cap = 45678 * 600
+    # About 5 minutes, don't care about the bitrate and the exact value
+    cap = 45678 * 5 * 60
     path, start, end = consume.bite(sel, cap)
-    loaded = None
     try:
         loaded = ac.load_audio(path, frame_offset=start, num_frames=end - start,
                                degrade_keep=random_degradation_value())
+        sg = ac.convert_from_wave(loaded)
+        return sg, path
     except Exception as e:
         if e is KeyboardInterrupt:
             raise e
         print(f"Pain... could not load audio file {str(path)}!")
         return take_a_bite(consume)
-    sg = ac.convert_from_wave(loaded)
-    return sg, path
 
 
 class CustomAudioDataset(Dataset):
@@ -392,7 +391,7 @@ def training():
         bite_i = 0
         eval_loss, cumm_train_loss = None, None
         while True:
-            if bite_i % 4 == 0:
+            if bite_i % 5 == 0:
                 bt = time.time()
                 eval_loss = eval_model(model, eval_datasets)
                 if eval_loss:

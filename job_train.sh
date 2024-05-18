@@ -7,7 +7,7 @@
 # The job requires 1 task per node
 #SBATCH --ntasks-per-node=1
 # The maximum walltime of the job
-#SBATCH -t 10:10:00
+#SBATCH -t 50:10:00
 #SBATCH --mem=16G
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=semjon.00@gmail.com
@@ -17,13 +17,13 @@
 
 module load any/python/3.8.3-conda
 # git pull --force
-git log -n 1 --pretty=format:"Commit: %H %s"
+git log -n 1 --pretty=format:"Commit: %H %s%n"
 # conda deactivate
 # conda create -n hypatia
 conda activate hypatia
 # conda install "pytorch::pytorch-cuda" "pytorch::torchaudio" "conda-forge::einops" "conda-forge::torchinfo" "conda-forge::ffmpeg<7" -c nvidia
 export PYTHONUNBUFFERED=TRUE
-python training.py --save_time=1800 --batch_size=32 --total_epochs=20
+python training.py --save_time=3600 --batch_size=16 --total_epochs=2
 
 # Reminder:
 #sbatch job_train.sh

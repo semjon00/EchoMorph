@@ -127,7 +127,7 @@ class AudioDecoder(Transformer):
         dims = [self.fragment_len // self.length_of_patch, self.spect_width, self.embed_dim]
         if len(im.size()) > 2:
             dims = [im.size(0)] + dims
-        feed = self.pos_embed(torch.zeros(dims, dtype=im.dtype, device=im.device))
+        feed = torch.zeros(dims, dtype=im.dtype, device=im.device)
         x = super().forward(feed, [im, sc])
         x = einops.rearrange(x, ' ... l w (c ld) -> ... (l ld) w c', ld=self.length_of_patch)
         return x
