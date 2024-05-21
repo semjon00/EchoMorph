@@ -31,12 +31,12 @@ class EchoMorphParameters:
         self.embed_dim = 128
         self.bottleneck_dim = 32
 
-        self.se_convrec = (2, 8)
+        self.se_convrec = (3, 8)
         self.se_convrepeat = 6
         self.se_blocks = 4
         self.se_output_tokens = 1024
 
-        self.ae_convrec = (2, 8)
+        self.ae_convrec = (3, 8)
         self.ae_convrepeat = 4
         self.ae_blocks = 6
 
@@ -116,7 +116,7 @@ class AudioEncoder(nn.Module):
 
 class AudioDecoder(Transformer):
     def __init__(self, pars: EchoMorphParameters):
-        super().__init__(input_dim=1, output_dim=2 * pars.length_of_patch,
+        super().__init__(input_dim=1, output_dim=3 * pars.length_of_patch,
                          input_size=(pars.fragment_len // pars.length_of_patch, pars.spect_width),
                          num_blocks=pars.ad_blocks, embed_dim=pars.embed_dim, cross_n=2)
 

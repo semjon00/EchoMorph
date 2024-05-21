@@ -45,20 +45,22 @@ class AudioConventer:
         """Obtains the spectrogram of the provided waveform."""
         sg = self.transform_to(wv.to(self.target_dtype)).T
         logamp = torch.clamp(torch.abs(sg), min=1e-10, max=1e2).log10()
-        logamp = (logamp + 10.000001) / 12  # Into [0;1]
-        x = logamp * torch.cos(torch.angle(sg))
-        y = logamp * torch.sin(torch.angle(sg))
-        sg = torch.cat([y.unsqueeze(-1), x.unsqueeze(-1)], dim=-1)
+        logamp = (logamp + 10.0) / 12.0  # Into [0;1]
+        logsqamp = logamp ** 2.0
+        sg = torch.cat([
+            logsqamp.unsqueeze(-1),
+            torch.sin(torch.angle(sg)).unsqueeze(-1),
+            torch.cos(torch.angle(sg)).unsqueeze(-1)
+        ], dim=-1)
         return sg.to(self.target_device, self.target_dtype)
 
     def convert_to_wave(self, t):
         """Reverses convert_from_wave, output precision is float32"""
-        y = t[..., 0]
-        x = t[..., 1]
-        phase = torch.atan2(y, x)
-        logamp = torch.sqrt(x ** 2 + y ** 2)
+        logamp = torch.clamp(t[..., 0], 0.0, 1.0) ** 0.5
         logamp = logamp * 12 - 10.0
         magnitude = torch.clamp((logamp * self.log10).exp(), max=1e2)
+        phase = torch.atan2(t[..., 1], t[..., 2])  # Try (t[..., 2], t[..., 1]) for a fun bug
+
         real_part = magnitude * torch.cos(phase)  # Maybe these two are mixed up. Whatever.
         imag_part = magnitude * torch.sin(phase)
         sg = torch.complex(real_part.to(torch.float32), imag_part.to(torch.float32)).T

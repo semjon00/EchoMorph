@@ -200,8 +200,8 @@ def load_progress():
         model = EchoMorph(pars).to(device=device, dtype=precision)
         print('  Initialized a new EchoMorph model...')
     for d in [1, 4]:
-        torchinfo_summary(model, ((args.batch_size, model.pars.history_len, model.pars.spect_width, 2),
-                                  (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 2),),
+        torchinfo_summary(model, ((args.batch_size, model.pars.history_len, model.pars.spect_width, 3),
+                                  (args.batch_size, model.pars.fragment_len, model.pars.spect_width, 3),),
                           depth=d)
     print(pars.__dict__)
 
@@ -338,7 +338,8 @@ def loss_function(pred, truth):
     #  * slightly different pitch is not too bad
     #  * large undershoot = "masked"
     #  Honestly, just read a couple of good papers
-    return torch.nn.functional.mse_loss(pred, truth)
+    return (torch.nn.functional.mse_loss(pred[0, ...], truth[0, ...]) +
+            0.5 * torch.nn.functional.mse_loss(pred[:1, ...], truth[:1, ...]))
 
 
 def train_on_bite(model: EchoMorph, optimizer: torch.optim.Optimizer, train_spect: Tensor, timings):
