@@ -126,6 +126,7 @@ class AudioDecoder(Transformer):
         self.embed_dim = pars.embed_dim
 
     def forward(self, im: Tensor, sc: Tensor) -> Tensor:
+        assert self.fragment_len % self.length_of_patch == 0, "Length must be neatly divisible into patches"
         dims = [self.fragment_len // self.length_of_patch, self.spect_width, 1]
         if len(im.size()) > 2:
             dims = [im.size(0)] + dims

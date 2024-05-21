@@ -383,7 +383,7 @@ def training():
     eval_datasets = create_eval_datasets(model.pars)
     last_save = time.time()
     optimizer = torch.optim.Adam(model.parameters(), lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 15)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 30)
     print_cuda_stats()
     print(f'Training initiated!')
     timings = {}
@@ -396,9 +396,6 @@ def training():
                 eval_loss = eval_model(model, eval_datasets)
                 if eval_loss:
                     print('Eval loss | overall: {}'.format(eval_loss))
-                    scheduler.step(eval_loss)
-                elif cumm_train_loss:
-                    scheduler.step(eval_loss)
                 cumm_train_loss = 0
                 upd_timings(timings, 'eval', bt)
 
@@ -410,6 +407,7 @@ def training():
 
             cur_train_loss = train_on_bite(model, optimizer, train_spect, timings)
             cumm_train_loss += cur_train_loss
+            scheduler.step()
 
             report(optimizer, consume, cur_train_loss, origin)
             if last_save + args.save_time < time.time():
