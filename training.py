@@ -383,8 +383,7 @@ def training():
     eval_datasets = create_eval_datasets(model.pars)
     last_save = time.time()
     optimizer = torch.optim.Adam(model.parameters(), lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=30, min_lr=1e-8,
-                                                           threshold=0.001, threshold_mode='rel')
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 15)
     print_cuda_stats()
     print(f'Training initiated!')
     timings = {}

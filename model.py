@@ -20,9 +20,9 @@ class EchoMorphParameters:
     def __init__(self, **kwargs):
         """By default, contains large model specs"""
         one_sec_len = round(24000 / 84 / 64) * 64  # sample_rate / hop_length; approximately
-        self.target_sample_len = one_sec_len // 32
-        self.history_len = one_sec_len // 32
-        self.fragment_len = one_sec_len // 32
+        self.target_sample_len = one_sec_len // 16
+        self.history_len = one_sec_len // 16
+        self.fragment_len = one_sec_len // 16
         assert self.target_sample_len == self.history_len, "oh no! - speaker encoding is TODO"
 
         self.spect_width = 128
@@ -31,12 +31,12 @@ class EchoMorphParameters:
         self.embed_dim = 128
         self.bottleneck_dim = 32
 
-        self.se_convrec = (3, 8)
-        self.se_convrepeat = 6
+        self.se_convrec = (3, 8, 16)
+        self.se_convrepeat = 4
         self.se_blocks = 4
-        self.se_output_tokens = 1024
+        self.se_output_tokens = 512
 
-        self.ae_convrec = (3, 8)
+        self.ae_convrec = (3, 8, 16)
         self.ae_convrepeat = 4
         self.ae_blocks = 6
 
