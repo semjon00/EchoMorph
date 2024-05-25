@@ -197,7 +197,7 @@ class InferenceFreestyle:
                     cur_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
                 else:
                     cur_sc = sc
-                intermediate = self.model.audio_encoder(source[cur:cur + fl, :].unsqueeze(0))
+                intermediate = self.model.audio_encoder(source[cur:cur + fl, :].unsqueeze(0), cur_sc.unsqueeze(0))
                 intermediate = self.model.bottleneck(intermediate)
                 intermediate = self.model.restorer(intermediate)
                 target[cur:cur + fl, :] = self.model.audio_decoder(intermediate, cur_sc)

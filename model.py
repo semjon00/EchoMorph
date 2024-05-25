@@ -33,7 +33,7 @@ class EchoMorphParameters:
 
         self.se_convrec = (3, 8, 16)
         self.se_convrepeat = 4
-        self.se_blocks = 4
+        self.se_blocks = 12
         self.se_output_tokens = 512
 
         self.ae_convrec = (3, 8, 16)
@@ -46,7 +46,7 @@ class EchoMorphParameters:
         self.rm_k_min = 0.5
         self.rm_k_max = 1.0
         self.rm_fun = 'lin'
-        self.se_kl_loss_k = 0.0001
+        self.se_kl_loss_k = 0.000
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -103,14 +103,14 @@ class AudioEncoder(nn.Module):
         self.transformer = Transformer(
             input_dim=self.cnn.out_channels, output_dim=pars.bottleneck_dim,
             input_size=(pars.fragment_len // reduction, pars.spect_width // reduction),
-            num_blocks=pars.ae_blocks, embed_dim=pars.embed_dim, cross_n=0,
+            num_blocks=pars.ae_blocks, embed_dim=pars.embed_dim, cross_n=1,
             rearrange_back=False
         )
         self.num_output_tokens = self.transformer.input_size[0] * self.transformer.input_size[1]
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, cross) -> Tensor:
         x = self.cnn(x)
-        x = self.transformer(x, [])
+        x = self.transformer(x, [cross])
         return x
 
 
@@ -153,7 +153,7 @@ class EchoMorph(nn.Module):
     def forward(self, target_sample, source_fragment):
         """Used for training, use inference.py for inference"""
         speaker_characteristic, se_loss = self.speaker_encoder.forward_train(target_sample)
-        intermediate = self.audio_encoder(source_fragment)
+        intermediate = self.audio_encoder(source_fragment, speaker_characteristic)
         intermediate = self.restorer(self.bottleneck(intermediate))
         output = self.audio_decoder(intermediate, speaker_characteristic)
         extra_loss = self.pars.se_kl_loss_k * se_loss
