@@ -127,7 +127,7 @@ class InferenceFreestyle:
         play_audio(tmpfile.name)
         os.remove(tmpfile.name)
 
-    def derive_sc(self, name, repeats=1, block_repeats=1):
+    def derive_sc(self, name, repeats=1):
         """Derives speaker characteristic from waveform. Can derive multiple and average them out."""
         assert repeats > 0
         with torch.inference_mode():
@@ -139,14 +139,14 @@ class InferenceFreestyle:
                 sg = torch.cat((padding, sg, padding), dim=0)
 
             print('Deriving: [', end='')
-            out = self.model.speaker_encoder.forward_use(sg[0:0+tsl, :], block_repeats)
+            out = self.model.speaker_encoder.forward_use(sg[0:0+tsl, :])
             print('.', end='')
             start_end = sg.size(0) - tsl
             start = 0
             for i in range(1, repeats):
                 # Deterministic, but uniform-like distribution of starting points
                 start = (start + 2147483647) % start_end
-                out += self.model.speaker_encoder.forward_use(sg[start:start+tsl, :], block_repeats)
+                out += self.model.speaker_encoder.forward_use(sg[start:start+tsl, :])
                 print('.', end='')
             print('] Done!')
             out /= repeats
@@ -173,10 +173,9 @@ class InferenceFreestyle:
         torch.clamp(obj, min=o_min, max=o_max)
         self.to_bank('c', obj, f'Forged from {name} by applying {p:.3f} grams of pure chaos')
 
-    def infer(self, sc_name, source_name, tradeoff: float = 0.95, quality: int = 4, radiation: float = 0):
+    def infer(self, sc_name, source_name, tradeoff: float = 0.95):
         # TODO: multi-merge (averaging multiple infer-s with slightly different windowing)
         # Updating model settings
-        assert 0 <= quality
         self.model.bottleneck.set_p(tradeoff)
 
         do_lerp = '->' in sc_name
@@ -198,22 +197,16 @@ class InferenceFreestyle:
                     cur_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
                 else:
                     cur_sc = sc
-                intermediate = self.model.audio_encoder(
-                    source[cur:cur + fl, :].unsqueeze(0), quality
-                )
-                if radiation > 1e-9:
-                    intermediate += torch.where(intermediate == 0, torch.tensor(0),
-                                                torch.randn_like(intermediate) * radiation)
+                intermediate = self.model.audio_encoder(source[cur:cur + fl, :].unsqueeze(0))
                 intermediate = self.model.bottleneck(intermediate)
-                target[cur:cur + fl, :] = self.model.audio_decoder(
-                    intermediate, cur_sc, quality
-                )
+                intermediate = self.model.restorer(intermediate)
+                target[cur:cur + fl, :] = self.model.audio_decoder(intermediate, cur_sc)
                 print('.', end='')
             print('] Done!')
 
         target = target[hl:, ...]
         return self.to_bank('s', target, f'Inferenced from {source_name} by {sc_name} with '
-                                         f't={tradeoff:.3f}, q={quality}, r={radiation:.3f}')
+                                         f't={tradeoff:.3f}')
 
     def list(self):
         for f in self.bank.keys():
@@ -275,8 +268,6 @@ if __name__ == '__main__':
                     freestyle.randomize_sc(cmd[1], float(cmd[2]))
                 case 'infer':
                     for mod in cmd[3:]:
-                        if mod.startswith('q='):
-                            mods['quality'] = int(mod[2:])
                         if mod.startswith('t='):
                             mods['tradeoff'] = float(mod[2:])
                         if mod.startswith('r='):
