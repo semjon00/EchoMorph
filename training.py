@@ -217,26 +217,17 @@ def load_progress():
     print(f'and {len(consume.paths)} files after refresh... ')
     print(f'  Total frames: {consume.total_durations}')
 
-    try:
-        training_params = pickle.load(open(directory / 'training_params.bin', 'rb'))
-        print('  Loaded training params.')
-    except:
-        training_params = [1.0]
-        print('  Initialized training params.')
-    training_params[0] = min(args.learning_rate, training_params[0])
-
     if not directory:
-        save_progress(model, consume, training_params)
-    return model, consume, training_params
+        save_progress(model, consume)
+    return model, consume
 
 
-def save_progress(model, consume, training_params):
+def save_progress(model, consume):
     time.sleep(0.5)
     p_snapshots = pathlib.Path("snapshots")
     directory = p_snapshots / datetime.datetime.now().replace(microsecond=0).isoformat().replace(':', '.')
     os.makedirs(directory, exist_ok=True)
     pickle.dump(consume, open(directory / 'consume.bin', 'wb'))
-    pickle.dump(training_params, open(directory / 'training_params.bin', 'wb'))
     save_model(directory, model)
     print('Saved progress.')
 
@@ -377,12 +368,11 @@ def training():
     verify_compatibility()
 
     print(f'Loading... Args: {args}')
-    model, consume, training_params = load_progress()
+    model, consume = load_progress()
 
-    lr, = training_params
     eval_datasets = create_eval_datasets(model.pars)
     last_save = time.time()
-    optimizer = torch.optim.Adam(model.parameters(), lr)
+    optimizer = torch.optim.Adam(model.parameters(), args.learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 30)
     print_cuda_stats()
     print(f'Training initiated!')
