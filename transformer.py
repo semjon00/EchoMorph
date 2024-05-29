@@ -164,6 +164,7 @@ if __name__ == '__main__':
         losses.append(loss.item())
         if len(losses) % 10 == 0:
             try:
+                print(losses[-1])
                 plt.title(f'Loss: {losses[-1]}')
                 plt.plot(list(range(len(losses))), losses)
                 plt.ylim(0, 0.25)

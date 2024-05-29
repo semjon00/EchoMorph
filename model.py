@@ -57,7 +57,7 @@ class SpeakerVAE(nn.Module):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__()
 
-        self.cnn = CNN(pars.se_convrec, pars.se_convrepeat)
+        self.cnn = CNN(pars.se_convrec, pars.se_convrepeat, pars.spect_width)
         reduction = self.cnn.res_reduction_factor()
         self.transformer = Transformer(
             input_dim=self.cnn.out_channels, output_dim=pars.embed_dim,
@@ -99,7 +99,7 @@ class AudioEncoder(nn.Module):
     def __init__(self, pars: EchoMorphParameters):
         super().__init__()
 
-        self.cnn = CNN(pars.ae_convrec, pars.ae_convrepeat)
+        self.cnn = CNN(pars.ae_convrec, pars.ae_convrepeat, pars.spect_width)
         reduction = self.cnn.res_reduction_factor()
         self.transformer = Transformer(
             input_dim=self.cnn.out_channels, output_dim=pars.bottleneck_dim,
