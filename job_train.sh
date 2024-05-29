@@ -23,7 +23,7 @@ git log -n 1 --pretty=format:"Commit: %H %s%n"
 conda activate hypatia
 # conda install "pytorch::pytorch-cuda" "pytorch::torchaudio" "conda-forge::einops" "conda-forge::torchinfo" "conda-forge::ffmpeg<7" -c nvidia
 export PYTHONUNBUFFERED=TRUE
-python training.py --save_time=3600 --batch_size=16 --total_epochs=2 --no_random_degradation
+python training.py --total_epochs=2 --batch_size=32 --learning_rate=0.0001 --save_time=3600 --no_random_degradation
 
 # Reminder:
 #sbatch job_train.sh

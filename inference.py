@@ -173,7 +173,7 @@ class InferenceFreestyle:
         torch.clamp(obj, min=o_min, max=o_max)
         self.to_bank('c', obj, f'Forged from {name} by applying {p:.3f} grams of pure chaos')
 
-    def infer(self, sc_name, source_name, tradeoff: float = 0.95):
+    def infer(self, sc_name, source_name, tradeoff: float = 0.0005):
         # TODO: multi-merge (averaging multiple infer-s with slightly different windowing)
         # Updating model settings
         self.model.bottleneck.set_p(tradeoff)
@@ -197,7 +197,8 @@ class InferenceFreestyle:
                     cur_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
                 else:
                     cur_sc = sc
-                intermediate = self.model.audio_encoder(source[cur:cur + fl, :].unsqueeze(0), cur_sc.unsqueeze(0))
+                orig_sc = self.model.speaker_encoder.forward_use(source[cur - hl:cur, :].unsqueeze(0))
+                intermediate = self.model.audio_encoder(source[cur:cur + fl, :].unsqueeze(0), orig_sc.unsqueeze(0))
                 intermediate = self.model.bottleneck(intermediate)
                 intermediate = self.model.restorer(intermediate)
                 target[cur:cur + fl, :] = self.model.audio_decoder(intermediate, cur_sc)

@@ -10,9 +10,10 @@ from transformer import Transformer
 
 # TODO: Re-introduce the history
 # TODO: Better loss function
+# TODO: Add a loss that incentivises VAE outputs to heavily influence reconstructed output
 # TODO: in CNN, different convolutions should be used for different pitches (use groups parameter)
 
-# TODO: Refactor training parameters into a separate class (don't forget kl_loss!)
+# TODO: Refactor training parameters into a separate class
 
 
 class EchoMorphParameters:

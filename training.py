@@ -430,4 +430,4 @@ def training():
 
 if __name__ == '__main__':
     training()
-    # Use like: python training.py --save_time=90 --batch_size=16
+    # See job_train for usage
