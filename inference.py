@@ -38,6 +38,7 @@ class InferenceFreestyle:
     def __init__(self):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.precision = torch.float32 if str(self.device) == "cpu" else torch.float16
+        print(f'Using device {self.device} with precision {self.precision}')
         self.ac = AudioConventer(self.device, self.precision)
 
         root_snapshots = pathlib.Path("snapshots")
@@ -173,7 +174,7 @@ class InferenceFreestyle:
         torch.clamp(obj, min=o_min, max=o_max)
         self.to_bank('c', obj, f'Forged from {name} by applying {p:.3f} grams of pure chaos')
 
-    def infer(self, sc_name, source_name, tradeoff: float = 0.0005):
+    def infer(self, sc_name, source_name, tradeoff: float = 0.3, persistence=0.1):
         # TODO: multi-merge (averaging multiple infer-s with slightly different windowing)
         # Updating model settings
         self.model.bottleneck.set_p(tradeoff)
@@ -194,20 +195,21 @@ class InferenceFreestyle:
             for cur in range(hl, target.size(0) - fl, fl):
                 if do_lerp:
                     lerp_c = (cur - hl) / (target.size(0) - hl)
-                    cur_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
+                    target_sc = sc[0] * (1 - lerp_c) + lerp_c * sc[1]
                 else:
-                    cur_sc = sc
+                    target_sc = sc
                 orig_sc = self.model.speaker_encoder.forward_use(source[cur - hl:cur, :].unsqueeze(0))
                 intermediate = self.model.audio_encoder(source[cur:cur + fl, :].unsqueeze(0), orig_sc.unsqueeze(0))
                 intermediate = self.model.bottleneck(intermediate)
                 intermediate = self.model.restorer(intermediate)
-                target[cur:cur + fl, :] = self.model.audio_decoder(intermediate, cur_sc)
+                effective_sc = persistence * target_sc + (1.0 - persistence) * orig_sc
+                target[cur:cur + fl, :] = self.model.audio_decoder(intermediate, effective_sc)
                 print('.', end='')
             print('] Done!')
 
         target = target[hl:, ...]
         return self.to_bank('s', target, f'Inferenced from {source_name} by {sc_name} with '
-                                         f't={tradeoff:.3f}')
+                                         f't={tradeoff:.5f} p={persistence:.3f}')
 
     def list(self):
         for f in self.bank.keys():
@@ -226,7 +228,7 @@ def demo(freestyle: InferenceFreestyle):
     src = input('Speech file path: ')
     if len(src) < 1:
         src = './dataset/tests/example1.mp3'
-        tgt_s = './dataset/tests/example1.mp3'
+        tgt_s = './dataset/tests/example6.mp3'
         save = './demo/result_temp.wav'
     else:
         tgt_s = input('Speaker file path: ')
@@ -273,6 +275,8 @@ if __name__ == '__main__':
                             mods['tradeoff'] = float(mod[2:])
                         if mod.startswith('r='):
                             mods['radiation'] = float(mod[2:])
+                        if mod.startswith('p='):
+                            mods['persistence'] = float(mod[2:])
                     if cmd[1][0] == 's' and cmd[2][0] == 'c':
                         cmd[1], cmd[2] = cmd[2], cmd[1]
                     freestyle.infer(cmd[1], cmd[2], **mods)

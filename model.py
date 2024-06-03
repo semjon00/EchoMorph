@@ -44,9 +44,9 @@ class EchoMorphParameters:
         self.rs_blocks = 6
         self.ad_blocks = 12
 
-        self.rm_k_min = 0.5
+        self.rm_k_min = 0.0001
         self.rm_k_max = 1.0
-        self.rm_fun = 'lin'
+        self.rm_fun = 'exp'
         self.se_kl_loss_k = 0.000
 
         for key, value in kwargs.items():

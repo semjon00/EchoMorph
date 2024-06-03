@@ -53,7 +53,6 @@ class RandoMask(RandMachine):
 class PriorityNoise(RandMachine):
     def __init__(self, k_min, k_max, fun, input_dim):
         super().__init__(k_min, k_max, fun)
-        assert fun == 'lin', 'PriorityNoise only supports lin mode'
         self.importance = nn.Sequential(
             nn.Linear(input_dim, 1),
             nn.Sigmoid(),
@@ -63,6 +62,8 @@ class PriorityNoise(RandMachine):
 
     def forward(self, x: Tensor):
         val = super().get_val()
+        if self.fun == 'exp':
+            val = (1.0 / self.k_min) ** val / (1.0 / self.k_min)
 
         # Make quality levels strictly conform to the budget constraint
         unadjusted_quality = self.importance(x)
