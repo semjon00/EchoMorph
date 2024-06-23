@@ -73,7 +73,7 @@ class PriorityNoise(RandMachine):
         quality = k.unsqueeze(-1) + s.unsqueeze(-1) * unadjusted_quality
 
         # eps for log is not needed, since sigmoid (as we scale it above) never touches 0 or 1
-        noise_levels = -torch.log(quality) * (torch.norm(x, dim=-1) / self.input_dim)
+        noise_levels = -torch.log(quality) * (torch.linalg.vector_norm(x, dim=-1, ord=2) / self.input_dim)
         noise_levels = einops.repeat(noise_levels, '... -> ... a', a=self.input_dim)
         noise = noise_levels * torch.randn_like(noise_levels)
 

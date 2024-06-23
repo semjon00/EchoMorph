@@ -30,7 +30,7 @@ class EchoMorphParameters:
         self.length_of_patch = 8
 
         self.embed_dim = 128
-        self.bottleneck_dim = 32
+        self.bottleneck_dim = 16
 
         self.se_convrec = (3, 8, 16)
         self.se_convrepeat = 4
@@ -47,7 +47,7 @@ class EchoMorphParameters:
         self.rm_k_min = 0.0001
         self.rm_k_max = 1.0
         self.rm_fun = 'exp'
-        self.se_kl_loss_k = 0.000
+        self.se_kl_loss_k = 0.001
 
         for key, value in kwargs.items():
             setattr(self, key, value)
